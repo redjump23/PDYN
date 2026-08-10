@@ -6,16 +6,16 @@
 //
 // Central MEXC market-data service.
 //
-// Markets:
+// MARKETS:
 //
 //   SPOT
 //   FUTURES
 //
-// CRT uses:
+// CRT USES:
 //
 //   FUTURES
 //
-// Supported CRT timeframes:
+// CRT TIMEFRAMES:
 //
 //   5m
 //   15m
@@ -27,6 +27,7 @@
 // services, but CRT top-down does NOT use 30m.
 //
 // ============================================================
+
 
 // ============================================================
 // BASE URLS
@@ -41,6 +42,7 @@ const SPOT_BASE_URL =
     ""
   );
 
+
 const FUTURES_BASE_URL =
   (
     process.env.MEXC_FUTURES_BASE_URL ||
@@ -51,6 +53,7 @@ const FUTURES_BASE_URL =
     ""
   );
 
+
 // ============================================================
 // TIMEFRAMES
 // ============================================================
@@ -60,6 +63,7 @@ const INTERVALS = {
   "5m": {
     spot:
       "5m",
+
     futures:
       "Min5",
   },
@@ -67,6 +71,7 @@ const INTERVALS = {
   "15m": {
     spot:
       "15m",
+
     futures:
       "Min15",
   },
@@ -74,6 +79,7 @@ const INTERVALS = {
   "30m": {
     spot:
       "30m",
+
     futures:
       "Min30",
   },
@@ -81,6 +87,7 @@ const INTERVALS = {
   "1h": {
     spot:
       "60m",
+
     futures:
       "Min60",
   },
@@ -88,6 +95,7 @@ const INTERVALS = {
   "4h": {
     spot:
       "4h",
+
     futures:
       "Hour4",
   },
@@ -95,11 +103,13 @@ const INTERVALS = {
   "1d": {
     spot:
       "1d",
+
     futures:
       "Day1",
   },
 
 };
+
 
 // ============================================================
 // ASSERT TIMEFRAME
@@ -123,6 +133,7 @@ function assertTimeframe(
 
 }
 
+
 // ============================================================
 // REQUEST JSON
 // ============================================================
@@ -139,6 +150,7 @@ async function requestJson(
     setTimeout(
       () =>
         controller.abort(),
+
       Number(
         process.env.MEXC_HTTP_TIMEOUT_MS
       ) || 10000
@@ -179,9 +191,11 @@ async function requestJson(
     try {
 
       data =
-        JSON.parse(
-          text
-        );
+        text
+          ? JSON.parse(
+              text
+            )
+          : null;
 
     } catch {
 
@@ -214,6 +228,7 @@ async function requestJson(
   }
 
 }
+
 
 // ============================================================
 // NORMALIZE SPOT KLINES
@@ -308,21 +323,26 @@ function normalizeSpotKlines(
         Number.isFinite(
           candle.openTime
         ) &&
+
         Number.isFinite(
           candle.open
         ) &&
+
         Number.isFinite(
           candle.high
         ) &&
+
         Number.isFinite(
           candle.low
         ) &&
+
         Number.isFinite(
           candle.close
         )
     );
 
 }
+
 
 // ============================================================
 // NORMALIZE FUTURES KLINES
@@ -375,6 +395,7 @@ function normalizeFuturesKlines(
       ? data.vol
       : [];
 
+
   const intervalMs = {
 
     "5m":
@@ -413,6 +434,7 @@ function normalizeFuturesKlines(
     timeframe
   ];
 
+
   if (
     !intervalMs
   ) {
@@ -420,6 +442,7 @@ function normalizeFuturesKlines(
     return [];
 
   }
+
 
   return times
     .map(
@@ -496,21 +519,26 @@ function normalizeFuturesKlines(
         Number.isFinite(
           candle.openTime
         ) &&
+
         Number.isFinite(
           candle.open
         ) &&
+
         Number.isFinite(
           candle.high
         ) &&
+
         Number.isFinite(
           candle.low
         ) &&
+
         Number.isFinite(
           candle.close
         )
     );
 
 }
+
 
 // ============================================================
 // GET SPOT KLINES
@@ -526,6 +554,7 @@ export async function getSpotKlines(
     timeframe
   );
 
+
   const safeLimit =
     Math.min(
       Math.max(
@@ -537,13 +566,16 @@ export async function getSpotKlines(
       1000
     );
 
+
   const params =
     new URLSearchParams({
 
       symbol:
         String(
           symbol
-        ).toUpperCase(),
+        )
+          .trim()
+          .toUpperCase(),
 
       interval:
         INTERVALS[
@@ -557,10 +589,12 @@ export async function getSpotKlines(
 
     });
 
+
   const data =
     await requestJson(
       `${SPOT_BASE_URL}/api/v3/klines?${params}`
     );
+
 
   if (
     !Array.isArray(
@@ -574,11 +608,13 @@ export async function getSpotKlines(
 
   }
 
+
   return normalizeSpotKlines(
     data
   );
 
 }
+
 
 // ============================================================
 // GET FUTURES KLINES
@@ -594,6 +630,7 @@ export async function getFuturesKlines(
     timeframe
   );
 
+
   const safeLimit =
     Math.min(
       Math.max(
@@ -605,10 +642,12 @@ export async function getFuturesKlines(
       1000
     );
 
+
   const interval =
     INTERVALS[
       timeframe
     ].futures;
+
 
   const params =
     new URLSearchParams({
@@ -622,12 +661,25 @@ export async function getFuturesKlines(
 
     });
 
+
   const normalizedSymbol =
     String(
       symbol
     )
       .trim()
       .toUpperCase();
+
+
+  if (
+    !normalizedSymbol
+  ) {
+
+    throw new Error(
+      "MEXC futures symbol is required."
+    );
+
+  }
+
 
   const data =
     await requestJson(
@@ -636,6 +688,7 @@ export async function getFuturesKlines(
         normalizedSymbol
       )}?${params}`
     );
+
 
   if (
     !data?.success ||
@@ -648,12 +701,14 @@ export async function getFuturesKlines(
 
   }
 
+
   return normalizeFuturesKlines(
     data.data,
     timeframe
   );
 
 }
+
 
 // ============================================================
 // GET GENERIC KLINES
@@ -667,7 +722,9 @@ export async function getKlines({
 }) {
 
   if (
-    market ===
+    String(
+      market
+    ).toLowerCase() ===
     "futures"
   ) {
 
@@ -679,6 +736,7 @@ export async function getKlines({
 
   }
 
+
   return getSpotKlines(
     symbol,
     timeframe,
@@ -686,6 +744,7 @@ export async function getKlines({
   );
 
 }
+
 
 // ============================================================
 // GET SPOT SYMBOLS
@@ -698,6 +757,7 @@ export async function getSpotSymbols() {
       `${SPOT_BASE_URL}/api/v3/exchangeInfo`
     );
 
+
   const symbols =
     Array.isArray(
       data?.symbols
@@ -705,7 +765,21 @@ export async function getSpotSymbols() {
       ? data.symbols
       : [];
 
+
   return symbols
+    .filter(
+      item => {
+
+        return (
+          item?.status ===
+            "ENABLED" ||
+
+          item?.isSpotTradingAllowed ===
+            true
+        );
+
+      }
+    )
     .map(
       item =>
         item?.symbol
@@ -715,6 +789,7 @@ export async function getSpotSymbols() {
     );
 
 }
+
 
 // ============================================================
 // GET FUTURES CONTRACTS
@@ -726,6 +801,7 @@ export async function getFuturesContracts() {
     await requestJson(
       `${FUTURES_BASE_URL}/api/v1/contract/detail`
     );
+
 
   if (
     !data?.success ||
@@ -740,9 +816,17 @@ export async function getFuturesContracts() {
 
   }
 
-  return data.data;
+
+  return data.data
+    .filter(
+      contract =>
+        Boolean(
+          contract?.symbol
+        )
+    );
 
 }
+
 
 // ============================================================
 // GET FUTURES SYMBOLS
@@ -752,6 +836,7 @@ export async function getFuturesSymbols() {
 
   const contracts =
     await getFuturesContracts();
+
 
   return contracts
     .filter(
@@ -765,6 +850,7 @@ export async function getFuturesSymbols() {
             .trim()
             .toUpperCase();
 
+
         const quote =
           String(
             contract?.quoteCoin ||
@@ -772,6 +858,7 @@ export async function getFuturesSymbols() {
           )
             .trim()
             .toUpperCase();
+
 
         const settle =
           String(
@@ -781,18 +868,23 @@ export async function getFuturesSymbols() {
             .trim()
             .toUpperCase();
 
+
         return (
           Boolean(
             symbol
           ) &&
+
           (
             quote ===
               "USDT" ||
+
             settle ===
               "USDT" ||
+
             symbol.endsWith(
               "_USDT"
             ) ||
+
             symbol.endsWith(
               "USDT"
             )
@@ -814,6 +906,41 @@ export async function getFuturesSymbols() {
     );
 
 }
+
+
+// ============================================================
+// CONFIGURED SYMBOLS
+// ============================================================
+
+export function getConfiguredSymbols(
+  market
+) {
+
+  const key =
+    String(
+      market
+    ).toLowerCase() ===
+    "futures"
+      ? "MEXC_FUTURES_SYMBOLS"
+      : "MEXC_SPOT_SYMBOLS";
+
+
+  return String(
+    process.env[
+      key
+    ] || ""
+  )
+    .split(",")
+    .map(
+      symbol =>
+        symbol.trim()
+    )
+    .filter(
+      Boolean
+    );
+
+}
+
 
 // ============================================================
 // SERVICE INFO
@@ -849,6 +976,11 @@ export function getMexcServiceInfo() {
     lowerTimeframe:
       "5m",
 
+    compatibilityTimeframes:
+      [
+        "30m",
+      ],
+
     removedCRTTimeframes:
       [
         "30m",
@@ -858,12 +990,26 @@ export function getMexcServiceInfo() {
 
 }
 
+
+// ============================================================
+// EXPORT INTERVALS
+// ============================================================
+
+export {
+  INTERVALS,
+};
+
+
 // ============================================================
 // STARTUP
 // ============================================================
 
 console.log(
   "[MEXC] MEXC service loaded."
+);
+
+console.log(
+  `[MEXC] Spot API: ${SPOT_BASE_URL}`
 );
 
 console.log(
