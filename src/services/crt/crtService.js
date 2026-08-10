@@ -21,25 +21,14 @@ import botConfig from "../../config/bot.js";
 //   BEARISH
 //
 // TIMEFRAMES:
-//   5m
-//   15m
-//   1h
-//   4h
-//   1d
+//   5m  -> TOP-DOWN ANALYSIS ONLY
+//   15m -> STANDARD CRT
+//   1h  -> STANDARD CRT
+//   4h  -> STANDARD CRT
+//   1d  -> STANDARD CRT
 //
-// TOP-DOWN ANALYSIS:
-//   5m ONLY
-//
-// 5m confirmation requires:
-//
-//   5m  = CRT signal
-//   15m = same Rachel T direction
-//   1h  = same Rachel T direction
-//   4h  = same Rachel T direction
-//   1d  = same Rachel T direction
-//
-// If any higher timeframe is not confirmed,
-// the 5m signal is NOT sent.
+// 30m:
+//   REMOVED
 //
 // OANDA:
 //   DISABLED
@@ -47,7 +36,23 @@ import botConfig from "../../config/bot.js";
 // MEXC SPOT:
 //   DISABLED
 //
+// 5m TOP-DOWN:
+//
+//   DAILY
+//      ↓
+//   4H
+//      ↓
+//   1H
+//      ↓
+//   15M
+//      ↓
+//   5M
+//
+// The 5m signal is only sent when ALL higher timeframes
+// confirm the same Rachel T fractal direction.
+//
 // ============================================================
+
 
 // ============================================================
 // CONFIG
@@ -55,6 +60,7 @@ import botConfig from "../../config/bot.js";
 
 const CRT_CONFIG =
   botConfig?.crt || {};
+
 
 // ============================================================
 // TIMEZONE
@@ -64,48 +70,76 @@ const CRT_TIMEZONE =
   CRT_CONFIG.timezone ||
   "Asia/Manila";
 
+
 // ============================================================
 // TIMEFRAMES
 // ============================================================
 //
-// 30m removed.
-// 5m restored.
+// 30m REMOVED.
+//
+// 5m is enabled for Top-Down Analysis.
 //
 // ============================================================
 
 const TIMEFRAMES =
   CRT_CONFIG.timeframes || {
+
     "5m": 5,
+
     "15m": 15,
+
     "1h": 60,
+
     "4h": 240,
+
     "1d": 1440,
+
   };
 
+
 // ============================================================
-// TOP-DOWN TIMEFRAMES
+// FORCE REQUIRED TIMEFRAMES
 // ============================================================
 //
-// Only 5m uses Top-Down confirmation.
+// This guarantees 30m is not used even if an older config
+// still contains it.
 //
 // ============================================================
 
-const TOP_DOWN_TIMEFRAME =
-  "5m";
+delete TIMEFRAMES["30m"];
 
-const TOP_DOWN_HIGHER_TIMEFRAMES = [
-  "15m",
-  "1h",
-  "4h",
-  "1d",
-];
 
 // ============================================================
 // DISCORD CHANNELS
 // ============================================================
 
-const CHANNELS =
-  CRT_CONFIG.channels || {};
+const CHANNELS = {
+
+  ...(CRT_CONFIG.channels || {}),
+
+  // New dedicated 5m channel
+  "5m":
+    "1536311840378986547",
+
+};
+
+
+// ============================================================
+// TOP-DOWN TIMEFRAMES
+// ============================================================
+
+const TOP_DOWN_TIMEFRAMES = [
+
+  "1d",
+
+  "4h",
+
+  "1h",
+
+  "15m",
+
+];
+
 
 // ============================================================
 // MEXC FUTURES API
@@ -121,6 +155,7 @@ const MEXC_BASE_URL =
     ""
   );
 
+
 // ============================================================
 // RSI
 // ============================================================
@@ -128,17 +163,21 @@ const MEXC_BASE_URL =
 const RSI_PERIOD =
   Number(
     CRT_CONFIG.rsi?.period
-  ) || 14;
+  ) ||
+  14;
 
 const RSI_OVERBOUGHT =
   Number(
     CRT_CONFIG.rsi?.overbought
-  ) || 70;
+  ) ||
+  70;
 
 const RSI_OVERSOLD =
   Number(
     CRT_CONFIG.rsi?.oversold
-  ) || 30;
+  ) ||
+  30;
+
 
 // ============================================================
 // STANDARD DEVIATION
@@ -147,17 +186,21 @@ const RSI_OVERSOLD =
 const STDDEV_PERIOD =
   Number(
     CRT_CONFIG.standardDeviation?.period
-  ) || 20;
+  ) ||
+  20;
 
 const STDDEV_HIGH_MULTIPLIER =
   Number(
     CRT_CONFIG.standardDeviation?.highMultiplier
-  ) || 1.5;
+  ) ||
+  1.5;
 
 const STDDEV_LOW_MULTIPLIER =
   Number(
     CRT_CONFIG.standardDeviation?.lowMultiplier
-  ) || 0.75;
+  ) ||
+  0.75;
+
 
 // ============================================================
 // MARKET STRUCTURE
@@ -166,12 +209,15 @@ const STDDEV_LOW_MULTIPLIER =
 const STRUCTURE_LOOKBACK =
   Number(
     CRT_CONFIG.marketStructure?.lookback
-  ) || 20;
+  ) ||
+  20;
 
 const STRUCTURE_SWING_LENGTH =
   Number(
     CRT_CONFIG.marketStructure?.swingLength
-  ) || 2;
+  ) ||
+  2;
+
 
 // ============================================================
 // RACHEL T FRACTALS
@@ -185,6 +231,7 @@ const FILTERED_TOP_ENABLED =
 
 const FILTERED_BOTTOM_ENABLED =
   true;
+
 
 // ============================================================
 // REQUEST SETTINGS
@@ -205,12 +252,14 @@ const CHECK_INTERVAL =
       )
     : 5000;
 
+
 // ============================================================
 // CONCURRENCY
 // ============================================================
 
 const MEXC_CONCURRENCY =
   4;
+
 
 // ============================================================
 // CACHE
@@ -227,6 +276,7 @@ const MEXC_SYMBOL_CACHE_TIME =
   60 *
   1000;
 
+
 // ============================================================
 // SIGNAL STATE
 // ============================================================
@@ -234,15 +284,14 @@ const MEXC_SYMBOL_CACHE_TIME =
 const signalState =
   new Map();
 
+
+// ============================================================
+// STARTUP BASELINE
+// ============================================================
+
 const startupBaseline =
   new Set();
 
-// ============================================================
-// TOP-DOWN STATE
-// ============================================================
-
-const topDownState =
-  new Map();
 
 // ============================================================
 // MONITOR STATE
@@ -254,6 +303,7 @@ let crtMonitorStarted =
 let monitorTimer =
   null;
 
+
 // ============================================================
 // MEXC BLOCK STATE
 // ============================================================
@@ -264,6 +314,7 @@ let mexcBlockedUntil =
 const MEXC_BLOCK_COOLDOWN =
   60 *
   1000;
+
 
 // ============================================================
 // FETCH JSON
@@ -297,15 +348,17 @@ async function fetchJson(
             controller.signal,
 
           headers: {
+
             Accept:
               "application/json",
 
             "User-Agent":
               "PDYN-CRT-Bot/1.0",
 
-            ...(options.headers ||
-              {}),
+            ...(options.headers || {}),
+
           },
+
         }
       );
 
@@ -319,9 +372,7 @@ async function fetchJson(
 
       data =
         text
-          ? JSON.parse(
-              text
-            )
+          ? JSON.parse(text)
           : null;
 
     } catch {
@@ -340,10 +391,7 @@ async function fetchJson(
           `HTTP ${response.status}: ${
             data?.msg ||
             data?.message ||
-            text.slice(
-              0,
-              250
-            )
+            text.slice(0, 250)
           }`
         );
 
@@ -354,6 +402,7 @@ async function fetchJson(
         url;
 
       throw error;
+
     }
 
     return data;
@@ -368,6 +417,7 @@ async function fetchJson(
 
 }
 
+
 // ============================================================
 // MEXC INTERVAL
 // ============================================================
@@ -377,6 +427,7 @@ function getMexcInterval(
 ) {
 
   const intervals = {
+
     "5m":
       "Min5",
 
@@ -391,16 +442,16 @@ function getMexcInterval(
 
     "1d":
       "Day1",
+
   };
 
   return (
-    intervals[
-      timeframe
-    ] ||
-    "Min5"
+    intervals[timeframe] ||
+    "Min15"
   );
 
 }
+
 
 // ============================================================
 // TIMEFRAME VALIDATION
@@ -427,6 +478,7 @@ export function isValidCRTTimeframe(
 
 }
 
+
 // ============================================================
 // AVAILABLE TIMEFRAMES
 // ============================================================
@@ -438,6 +490,7 @@ export function getAvailableCRTTimeframes() {
   );
 
 }
+
 
 // ============================================================
 // ZONED TIME
@@ -474,6 +527,7 @@ function getZonedParts(
 
         hourCycle:
           "h23",
+
       }
     );
 
@@ -509,6 +563,7 @@ function getZonedParts(
 
 }
 
+
 // ============================================================
 // CURRENT CRT TIME
 // ============================================================
@@ -520,6 +575,7 @@ export function getCRTNow() {
   );
 
 }
+
 
 // ============================================================
 // PAD
@@ -538,6 +594,7 @@ function pad(
 
 }
 
+
 // ============================================================
 // DATE
 // ============================================================
@@ -554,6 +611,7 @@ function formatDateParts(
 
 }
 
+
 // ============================================================
 // TIME
 // ============================================================
@@ -569,6 +627,7 @@ function formatTimeParts(
   );
 
 }
+
 
 // ============================================================
 // TIME WITH SECONDS
@@ -587,6 +646,7 @@ function formatTimeSeconds(
   );
 
 }
+
 
 // ============================================================
 // CURRENT CRT
@@ -682,26 +742,27 @@ export function getCurrentCRT(
 
       timezone:
         CRT_TIMEZONE,
+
     };
 
   }
 
   const totalMinutes =
     now.hour *
-      60 +
+    60 +
     now.minute;
 
   const candleStartMinutes =
     Math.floor(
       totalMinutes /
-        minutes
+      minutes
     ) *
     minutes;
 
   const startHour =
     Math.floor(
       candleStartMinutes /
-        60
+      60
     );
 
   const startMinute =
@@ -715,7 +776,7 @@ export function getCurrentCRT(
   const endHour =
     Math.floor(
       endTotalMinutes /
-        60
+      60
     ) %
     24;
 
@@ -736,8 +797,8 @@ export function getCurrentCRT(
   const endTimestamp =
     startTimestamp +
     minutes *
-      60 *
-      1000;
+    60 *
+    1000;
 
   return {
 
@@ -777,9 +838,11 @@ export function getCurrentCRT(
 
     timezone:
       CRT_TIMEZONE,
+
   };
 
 }
+
 
 // ============================================================
 // REMAINING TIME
@@ -798,28 +861,28 @@ export function getRemainingTime(
     Math.max(
       0,
       crt.endTimestamp -
-        Date.now()
+      Date.now()
     );
 
   const totalSeconds =
     Math.floor(
       remaining /
-        1000
+      1000
     );
 
   const hours =
     Math.floor(
       totalSeconds /
-        3600
+      3600
     );
 
   const minutes =
     Math.floor(
       (
         totalSeconds %
-          3600
+        3600
       ) /
-        60
+      60
     );
 
   const seconds =
@@ -827,14 +890,19 @@ export function getRemainingTime(
     60;
 
   return [
+
     pad(hours),
+
     pad(minutes),
+
     pad(seconds),
+
   ].join(
     ":"
   );
 
 }
+
 
 // ============================================================
 // CRT STATUS
@@ -889,9 +957,11 @@ export function getCRTStatus(
 
     endTimestamp:
       crt.endTimestamp,
+
   };
 
 }
+
 
 // ============================================================
 // NORMALIZE MEXC SYMBOL
@@ -903,12 +973,13 @@ function normalizeMexcSymbol(
 
   return String(
     symbol ||
-      ""
+    ""
   )
     .trim()
     .toUpperCase();
 
 }
+
 
 // ============================================================
 // GET MEXC FUTURES SYMBOLS
@@ -972,13 +1043,13 @@ async function getMexcFuturesSymbols() {
             const quoteCoin =
               String(
                 contract?.quoteCoin ||
-                  ""
+                ""
               ).toUpperCase();
 
             const settleCoin =
               String(
                 contract?.settleCoin ||
-                  ""
+                ""
               ).toUpperCase();
 
             const isUSDT =
@@ -1072,6 +1143,7 @@ async function getMexcFuturesSymbols() {
   }
 
 }
+
 
 // ============================================================
 // FETCH MEXC CANDLES
@@ -1170,6 +1242,7 @@ async function fetchMexcCandles(
 
 }
 
+
 // ============================================================
 // NORMALIZE TIMESTAMP
 // ============================================================
@@ -1198,14 +1271,17 @@ function normalizeTimestamp(
     100000000000
   ) {
 
-    return number *
-      1000;
+    return (
+      number *
+      1000
+    );
 
   }
 
   return number;
 
 }
+
 
 // ============================================================
 // PARSE MEXC KLINE
@@ -1254,42 +1330,31 @@ function parseMexcKlineResponse(
 
         open:
           Number(
-            data.open?.[
-              i
-            ]
+            data.open?.[i]
           ),
 
         high:
           Number(
-            data.high?.[
-              i
-            ]
+            data.high?.[i]
           ),
 
         low:
           Number(
-            data.low?.[
-              i
-            ]
+            data.low?.[i]
           ),
 
         close:
           Number(
-            data.close?.[
-              i
-            ]
+            data.close?.[i]
           ),
 
         volume:
           Number(
-            data.vol?.[
-              i
-            ] ||
-            data.volume?.[
-              i
-            ] ||
+            data.vol?.[i] ||
+            data.volume?.[i] ||
             0
           ),
+
       };
 
       if (
@@ -1367,6 +1432,7 @@ function parseMexcKlineResponse(
                   row[5] ||
                   0
                 ),
+
             };
 
           }
@@ -1404,6 +1470,7 @@ function parseMexcKlineResponse(
                 row?.volume ||
                 0
               ),
+
           };
 
         }
@@ -1426,6 +1493,7 @@ function parseMexcKlineResponse(
 
 }
 
+
 // ============================================================
 // VALID CANDLE
 // ============================================================
@@ -1435,6 +1503,7 @@ function isValidCandle(
 ) {
 
   return (
+
     candle &&
 
     Number.isFinite(
@@ -1456,9 +1525,11 @@ function isValidCandle(
     Number.isFinite(
       candle.close
     )
+
   );
 
 }
+
 
 // ============================================================
 // RSI
@@ -1619,6 +1690,7 @@ export function calculateRSI(
 
 }
 
+
 // ============================================================
 // RSI STATE
 // ============================================================
@@ -1658,6 +1730,7 @@ function getRSIState(
   return "NEUTRAL";
 
 }
+
 
 // ============================================================
 // STANDARD DEVIATION
@@ -1762,7 +1835,7 @@ export function calculateStandardDeviation(
         sum +
         Math.pow(
           value -
-            mean,
+          mean,
           2
         ),
       0
@@ -1870,7 +1943,7 @@ export function calculateStandardDeviation(
             sum +
             Math.pow(
               item -
-                avg,
+              avg,
               2
             ),
           0
@@ -1934,9 +2007,11 @@ export function calculateStandardDeviation(
 
     baseline:
       averageHistorical,
+
   };
 
 }
+
 
 // ============================================================
 // RACHEL T TOP FRACTAL
@@ -1984,6 +2059,7 @@ function isBWTop(
     ];
 
   return (
+
     c4.high <
       c2.high &&
 
@@ -1995,9 +2071,11 @@ function isBWTop(
 
     c2.high >
       c0.high
+
   );
 
 }
+
 
 // ============================================================
 // RACHEL T BOTTOM FRACTAL
@@ -2045,6 +2123,7 @@ function isBWBottom(
     ];
 
   return (
+
     c4.low >
       c2.low &&
 
@@ -2056,9 +2135,11 @@ function isBWBottom(
 
     c2.low <
       c0.low
+
   );
 
 }
+
 
 // ============================================================
 // FILTERED TOP
@@ -2084,6 +2165,7 @@ function isFilteredTop(
 
 }
 
+
 // ============================================================
 // FILTERED BOTTOM
 // ============================================================
@@ -2107,6 +2189,7 @@ function isFilteredBottom(
   );
 
 }
+
 
 // ============================================================
 // FIND LAST FRACTAL
@@ -2133,7 +2216,7 @@ function findLastFilteredFractal(
     let index =
       lastIndex;
     index >=
-    4;
+      4;
     index--
   ) {
 
@@ -2176,6 +2259,7 @@ function findLastFilteredFractal(
 
         volume:
           candle.volume,
+
       };
 
     }
@@ -2210,6 +2294,7 @@ function findLastFilteredFractal(
 
         volume:
           candle.volume,
+
       };
 
     }
@@ -2219,6 +2304,7 @@ function findLastFilteredFractal(
   return null;
 
 }
+
 
 // ============================================================
 // FIND NEW FRACTAL
@@ -2246,7 +2332,7 @@ function findNewestFractalAfter(
     let index =
       lastIndex;
     index >=
-    4;
+      4;
     index--
   ) {
 
@@ -2298,6 +2384,7 @@ function findNewestFractalAfter(
 
         volume:
           candle.volume,
+
       };
 
     }
@@ -2332,6 +2419,7 @@ function findNewestFractalAfter(
 
         volume:
           candle.volume,
+
       };
 
     }
@@ -2341,6 +2429,7 @@ function findNewestFractalAfter(
   return null;
 
 }
+
 
 // ============================================================
 // FIND SWING HIGHS
@@ -2359,7 +2448,7 @@ function findSwingHighs(
     let i =
       swingLength;
     i <
-    candles.length -
+      candles.length -
       swingLength;
     i++
   ) {
@@ -2375,7 +2464,7 @@ function findSwingHighs(
     for (
       let j = 1;
       j <=
-      swingLength;
+        swingLength;
       j++
     ) {
 
@@ -2415,6 +2504,7 @@ function findSwingHighs(
 
         price:
           current,
+
       });
 
     }
@@ -2424,6 +2514,7 @@ function findSwingHighs(
   return swings;
 
 }
+
 
 // ============================================================
 // FIND SWING LOWS
@@ -2442,7 +2533,7 @@ function findSwingLows(
     let i =
       swingLength;
     i <
-    candles.length -
+      candles.length -
       swingLength;
     i++
   ) {
@@ -2458,7 +2549,7 @@ function findSwingLows(
     for (
       let j = 1;
       j <=
-      swingLength;
+        swingLength;
       j++
     ) {
 
@@ -2498,6 +2589,7 @@ function findSwingLows(
 
         price:
           current,
+
       });
 
     }
@@ -2508,8 +2600,16 @@ function findSwingLows(
 
 }
 
+
 // ============================================================
 // MARKET STRUCTURE
+// ============================================================
+//
+// Output:
+//
+//   BULLISH
+//   BEARISH
+//
 // ============================================================
 
 export function calculateMarketStructure(
@@ -2543,6 +2643,7 @@ export function calculateMarketStructure(
 
       previousLow:
         null,
+
     };
 
   }
@@ -2637,7 +2738,7 @@ export function calculateMarketStructure(
   const currentPrice =
     candles[
       candles.length -
-        1
+      1
     ].close;
 
   if (
@@ -2733,12 +2834,14 @@ export function calculateMarketStructure(
     lastLow,
 
     previousLow,
+
   };
 
 }
 
+
 // ============================================================
-// GET VOLATILITY STATE
+// STANDARD DEVIATION CONTEXT
 // ============================================================
 
 function getVolatilityState(
@@ -2775,19 +2878,16 @@ function getVolatilityState(
 
 }
 
+
 // ============================================================
-// GET LATEST RACHEL T DIRECTION
+// GET FRACTAL CONFIRMATION
 // ============================================================
 //
-// This is used by the Top-Down system.
-//
-// A fractal is considered confirmed only after the
-// right-side candles required by the Rachel T fractal
-// have completed.
+// This is the core signal used for Top-Down Analysis.
 //
 // ============================================================
 
-function getRachelTDirection(
+function getFractalConfirmation(
   candles
 ) {
 
@@ -2803,164 +2903,44 @@ function getRachelTDirection(
 
   }
 
-  const fractal =
-    findLastFilteredFractal(
-      candles
-    );
-
-  if (
-    !fractal
-  ) {
-
-    return null;
-
-  }
-
-  return {
-
-    direction:
-      fractal.type,
-
-    fractalType:
-      fractal.fractalType,
-
-    timestamp:
-      fractal.timestamp,
-
-    price:
-      fractal.fractalPrice,
-
-    volume:
-      fractal.volume,
-  };
+  return findLastFilteredFractal(
+    candles
+  );
 
 }
+
 
 // ============================================================
 // TOP-DOWN ANALYSIS
 // ============================================================
 //
-// 5m requires:
+// Higher timeframe confirmation:
 //
-// 15m + 1h + 4h + 1d
+//   1D
+//   4H
+//   1H
+//   15M
 //
-// to all have the same confirmed Rachel T direction.
+// ALL must have a Rachel T fractal signal.
 //
-// The 5m signal itself must also match.
+// ALL must have the SAME direction.
+//
+// If one timeframe is missing or opposite,
+// the 5m signal is rejected.
 //
 // ============================================================
 
-function calculateTopDownAnalysis(
-  fiveMinuteSignal,
-  higherTimeframeData
-) {
-
-  if (
-    !fiveMinuteSignal
-  ) {
-
-    return {
-
-      confirmed:
-        false,
-
-      direction:
-        null,
-
-      timeframes:
-        {},
-
-    };
-
-  }
-
-  const fiveDirection =
-    fiveMinuteSignal.type;
-
-  const results =
-    {};
-
-  let allConfirmed =
-    true;
-
-  for (
-    const timeframe of
-    TOP_DOWN_HIGHER_TIMEFRAMES
-  ) {
-
-    const data =
-      higherTimeframeData[
-        timeframe
-      ];
-
-    const direction =
-      data?.direction ||
-      null;
-
-    results[
-      timeframe
-    ] = {
-
-      confirmed:
-        Boolean(
-          direction
-        ),
-
-      direction,
-
-      fractalType:
-        data?.fractalType ||
-        null,
-
-      timestamp:
-        data?.timestamp ||
-        null,
-    };
-
-    if (
-      !direction ||
-      direction !==
-        fiveDirection
-    ) {
-
-      allConfirmed =
-        false;
-
-    }
-
-  }
-
-  return {
-
-    confirmed:
-      allConfirmed,
-
-    direction:
-      allConfirmed
-        ? fiveDirection
-        : null,
-
-    timeframes:
-      results,
-  };
-
-}
-
-// ============================================================
-// FETCH TOP-DOWN DATA
-// ============================================================
-
-async function fetchTopDownAnalysis(
+async function performTopDownAnalysis(
   symbol,
   fiveMinuteSignal
 ) {
 
-  const higherTimeframeData =
+  const confirmations =
     {};
 
   for (
     const timeframe of
-    TOP_DOWN_HIGHER_TIMEFRAMES
+    TOP_DOWN_TIMEFRAMES
   ) {
 
     try {
@@ -2972,8 +2952,11 @@ async function fetchTopDownAnalysis(
         );
 
       if (
+        !Array.isArray(
+          candles
+        ) ||
         candles.length <
-        20
+          20
       ) {
 
         return {
@@ -2984,19 +2967,22 @@ async function fetchTopDownAnalysis(
           direction:
             null,
 
-          timeframes:
-            higherTimeframeData,
+          confirmations,
+
+          reason:
+            `${timeframe} data unavailable`,
+
         };
 
       }
 
-      const direction =
-        getRachelTDirection(
+      const fractal =
+        getFractalConfirmation(
           candles
         );
 
       if (
-        !direction
+        !fractal
       ) {
 
         return {
@@ -3007,23 +2993,39 @@ async function fetchTopDownAnalysis(
           direction:
             null,
 
-          timeframes:
-            higherTimeframeData,
+          confirmations,
+
+          reason:
+            `${timeframe} has no Rachel T confirmation`,
+
         };
 
       }
 
-      higherTimeframeData[
+      confirmations[
         timeframe
-      ] =
-        direction;
+      ] = {
+
+        confirmed:
+          true,
+
+        direction:
+          fractal.type,
+
+        fractalType:
+          fractal.fractalType,
+
+        timestamp:
+          fractal.timestamp,
+
+      };
 
     } catch (
       error
     ) {
 
       console.error(
-        `[CRT] Top-Down ${symbol} ${timeframe}: ${error.message}`
+        `[CRT] Top-down ${symbol} ${timeframe}: ${error.message}`
       );
 
       return {
@@ -3034,26 +3036,147 @@ async function fetchTopDownAnalysis(
         direction:
           null,
 
-        timeframes:
-          higherTimeframeData,
+        confirmations,
+
+        reason:
+          `${timeframe} analysis failed`,
+
       };
 
     }
 
   }
 
-  return calculateTopDownAnalysis(
-    fiveMinuteSignal,
-    higherTimeframeData
-  );
+  const directions =
+    TOP_DOWN_TIMEFRAMES.map(
+      (
+        timeframe
+      ) =>
+        confirmations[
+          timeframe
+        ]?.direction
+    );
+
+  const allConfirmed =
+    directions.every(
+      (
+        direction
+      ) =>
+        direction ===
+        "BUY" ||
+        direction ===
+        "SELL"
+    );
+
+  if (
+    !allConfirmed
+  ) {
+
+    return {
+
+      confirmed:
+        false,
+
+      direction:
+        null,
+
+      confirmations,
+
+      reason:
+        "Not all higher timeframes confirmed",
+
+    };
+
+  }
+
+  const firstDirection =
+    directions[0];
+
+  const sameDirection =
+    directions.every(
+      (
+        direction
+      ) =>
+        direction ===
+        firstDirection
+    );
+
+  if (
+    !sameDirection
+  ) {
+
+    return {
+
+      confirmed:
+        false,
+
+      direction:
+        null,
+
+      confirmations,
+
+      reason:
+        "Higher timeframes disagree",
+
+    };
+
+  }
+
+  if (
+    fiveMinuteSignal &&
+    fiveMinuteSignal.type !==
+      firstDirection
+  ) {
+
+    return {
+
+      confirmed:
+        false,
+
+      direction:
+        null,
+
+      confirmations,
+
+      reason:
+        "5m signal disagrees with higher timeframes",
+
+    };
+
+  }
+
+  return {
+
+    confirmed:
+      true,
+
+    direction:
+      firstDirection,
+
+    confirmations,
+
+    reason:
+      "All higher timeframes confirmed",
+
+  };
 
 }
 
+
 // ============================================================
-// PROCESS MARKET
+// PROCESS STANDARD MARKET
+// ============================================================
+//
+// Used for:
+//
+//   15m
+//   1h
+//   4h
+//   1d
+//
 // ============================================================
 
-async function processMarket(
+async function processStandardMarket(
   client,
   symbol,
   timeframe,
@@ -3179,63 +3302,7 @@ async function processMarket(
   }
 
   // ----------------------------------------------------------
-  // 5M TOP-DOWN CONFIRMATION
-  // ----------------------------------------------------------
-
-  let topDown =
-    null;
-
-  if (
-    timeframe ===
-    TOP_DOWN_TIMEFRAME
-  ) {
-
-    topDown =
-      await fetchTopDownAnalysis(
-        symbol,
-        signal
-      );
-
-    // --------------------------------------------------------
-    // IMPORTANT:
-    //
-    // 5m is NOT sent unless:
-    //
-    // 5m
-    // 15m
-    // 1h
-    // 4h
-    // 1d
-    //
-    // all agree.
-    // --------------------------------------------------------
-
-    if (
-      !topDown.confirmed
-    ) {
-
-      console.log(
-        `[CRT] 5m BLOCKED | ${symbol} | ` +
-        `Top-Down not fully confirmed`
-      );
-
-      return;
-
-    }
-
-    console.log(
-      `[CRT] 5m TOP-DOWN CONFIRMED | ` +
-      `${symbol} | ${signal.type} | ` +
-      `15m=${topDown.timeframes["15m"]?.direction} | ` +
-      `1h=${topDown.timeframes["1h"]?.direction} | ` +
-      `4h=${topDown.timeframes["4h"]?.direction} | ` +
-      `1d=${topDown.timeframes["1d"]?.direction}`
-    );
-
-  }
-
-  // ----------------------------------------------------------
-  // SAVE SIGNAL
+  // SAVE BEFORE SEND
   // ----------------------------------------------------------
 
   signalState.set(
@@ -3265,12 +3332,220 @@ async function processMarket(
 
       marketStructure,
 
+      topDown:
+        null,
+
+    }
+  );
+
+}
+
+
+// ============================================================
+// PROCESS 5M TOP-DOWN MARKET
+// ============================================================
+//
+// The 5m signal is NOT sent using normal standalone CRT.
+//
+// It must pass:
+//
+//   1D
+//   4H
+//   1H
+//   15M
+//   5M
+//
+// confirmation.
+//
+// ============================================================
+
+async function processFiveMinuteMarket(
+  client,
+  symbol,
+  candles
+) {
+
+  if (
+    !Array.isArray(
+      candles
+    ) ||
+    candles.length <
+      20
+  ) {
+
+    return;
+
+  }
+
+  const timeframe =
+    "5m";
+
+  const rsi =
+    calculateRSI(
+      candles,
+      RSI_PERIOD
+    );
+
+  const rsiState =
+    getRSIState(
+      rsi
+    );
+
+  const standardDeviation =
+    calculateStandardDeviation(
+      candles,
+      STDDEV_PERIOD
+    );
+
+  const marketStructure =
+    calculateMarketStructure(
+      candles
+    );
+
+  const stateKey =
+    `MEXC|${symbol}|5m`;
+
+  const previousTimestamp =
+    signalState.get(
+      stateKey
+    );
+
+  let signal;
+
+  if (
+    Number.isFinite(
+      previousTimestamp
+    )
+  ) {
+
+    signal =
+      findNewestFractalAfter(
+        candles,
+        previousTimestamp
+      );
+
+  } else {
+
+    signal =
+      findLastFilteredFractal(
+        candles
+      );
+
+  }
+
+  if (
+    !signal
+  ) {
+
+    return;
+
+  }
+
+  // ----------------------------------------------------------
+  // STARTUP BASELINE
+  // ----------------------------------------------------------
+
+  if (
+    !startupBaseline.has(
+      stateKey
+    )
+  ) {
+
+    signalState.set(
+      stateKey,
+      signal.timestamp
+    );
+
+    startupBaseline.add(
+      stateKey
+    );
+
+    console.log(
+      `[CRT] 5m Baseline | MEXC | ${symbol} | ${signal.fractalType}`
+    );
+
+    return;
+
+  }
+
+  // ----------------------------------------------------------
+  // DUPLICATE PROTECTION
+  // ----------------------------------------------------------
+
+  if (
+    signal.timestamp <=
+    (
+      signalState.get(
+        stateKey
+      ) ||
+      0
+    )
+  ) {
+
+    return;
+
+  }
+
+  // ----------------------------------------------------------
+  // TOP-DOWN ANALYSIS
+  // ----------------------------------------------------------
+
+  const topDown =
+    await performTopDownAnalysis(
+      symbol,
+      signal
+    );
+
+  if (
+    !topDown.confirmed
+  ) {
+
+    console.log(
+      `[CRT] 5m rejected | ${symbol} | ${topDown.reason}`
+    );
+
+    return;
+
+  }
+
+  // ----------------------------------------------------------
+  // SAVE ONLY AFTER FULL CONFIRMATION
+  // ----------------------------------------------------------
+
+  signalState.set(
+    stateKey,
+    signal.timestamp
+  );
+
+  // ----------------------------------------------------------
+  // SEND 5M TOP-DOWN SIGNAL
+  // ----------------------------------------------------------
+
+  await sendCRTSignal(
+    client,
+    {
+
+      symbol,
+
+      timeframe,
+
+      signal,
+
+      rsi,
+
+      rsiState,
+
+      standardDeviation,
+
+      marketStructure,
+
       topDown,
 
     }
   );
 
 }
+
 
 // ============================================================
 // FORMAT PRICE
@@ -3305,6 +3580,7 @@ function formatPrice(
 
         maximumFractionDigits:
           2,
+
       }
     );
 
@@ -3325,6 +3601,7 @@ function formatPrice(
 
         maximumFractionDigits:
           5,
+
       }
     );
 
@@ -3338,10 +3615,12 @@ function formatPrice(
 
       maximumFractionDigits:
         8,
+
     }
   );
 
 }
+
 
 // ============================================================
 // FORMAT VOLUME
@@ -3423,6 +3702,7 @@ function formatVolume(
 
 }
 
+
 // ============================================================
 // FORMAT RSI
 // ============================================================
@@ -3456,6 +3736,7 @@ function formatRSI(
 
 }
 
+
 // ============================================================
 // FORMAT STANDARD DEVIATION
 // ============================================================
@@ -3477,6 +3758,7 @@ function formatStandardDeviation(
   );
 
 }
+
 
 // ============================================================
 // FORMAT MARKET STRUCTURE
@@ -3502,6 +3784,60 @@ function formatMarketStructure(
   );
 
 }
+
+
+// ============================================================
+// FORMAT TOP-DOWN
+// ============================================================
+
+function formatTopDown(
+  topDown
+) {
+
+  if (
+    !topDown ||
+    !topDown.confirmed
+  ) {
+
+    return null;
+
+  }
+
+  const direction =
+    topDown.direction;
+
+  const confirmations =
+    topDown.confirmations ||
+    {};
+
+  const daily =
+    confirmations["1d"]?.direction ||
+    "N/A";
+
+  const fourHour =
+    confirmations["4h"]?.direction ||
+    "N/A";
+
+  const oneHour =
+    confirmations["1h"]?.direction ||
+    "N/A";
+
+  const fifteen =
+    confirmations["15m"]?.direction ||
+    "N/A";
+
+  return (
+
+    `1D ${daily}\n` +
+    `4H ${fourHour}\n` +
+    `1H ${oneHour}\n` +
+    `15M ${fifteen}\n` +
+    `5M ${direction}`
+
+  );
+
+}
+
 
 // ============================================================
 // FORMAT SIGNAL TIME
@@ -3534,6 +3870,7 @@ function formatSignalTime(
 
       hourCycle:
         "h23",
+
     }
   ).format(
     new Date(
@@ -3542,6 +3879,7 @@ function formatSignalTime(
   );
 
 }
+
 
 // ============================================================
 // CREATE DISCORD EMBED
@@ -3552,13 +3890,21 @@ function createSignalEmbed(
 ) {
 
   const {
+
     symbol,
+
     timeframe,
+
     signal,
+
     rsi,
+
     standardDeviation,
+
     marketStructure,
+
     topDown,
+
   } =
     data;
 
@@ -3569,19 +3915,19 @@ function createSignalEmbed(
   const color =
     isBuy
       ? (
-          CRT_CONFIG.colors
-            ?.buy ||
+          CRT_CONFIG.colors?.buy ||
           "#57F287"
         )
       : (
-          CRT_CONFIG.colors
-            ?.sell ||
+          CRT_CONFIG.colors?.sell ||
           "#ED4245"
         );
 
+  // Only coin is bold
   const coin =
     `**${symbol}**`;
 
+  // Only volume is bold
   const volume =
     `**${formatVolume(
       signal.volume
@@ -3603,6 +3949,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3614,6 +3961,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3627,6 +3975,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3640,6 +3989,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3651,6 +4001,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3664,6 +4015,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3677,6 +4029,7 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
 
     {
@@ -3688,22 +4041,18 @@ function createSignalEmbed(
 
       inline:
         true,
+
     },
+
   ];
 
   // ----------------------------------------------------------
-  // TOP-DOWN INFORMATION
-  // ----------------------------------------------------------
-  //
-  // Only display this section for the 5m signal.
-  //
-  // At this point topDown.confirmed is guaranteed true.
-  //
+  // 5M TOP-DOWN FIELD
   // ----------------------------------------------------------
 
   if (
     timeframe ===
-      TOP_DOWN_TIMEFRAME &&
+    "5m" &&
     topDown?.confirmed
   ) {
 
@@ -3713,50 +4062,54 @@ function createSignalEmbed(
         "TOP-DOWN",
 
       value:
-        `15m ${topDown.timeframes["15m"]?.direction} ; ` +
-        `1h ${topDown.timeframes["1h"]?.direction} ; ` +
-        `4h ${topDown.timeframes["4h"]?.direction} ; ` +
-        `1d ${topDown.timeframes["1d"]?.direction}`,
+        formatTopDown(
+          topDown
+        ),
 
       inline:
         false,
+
     });
 
   }
 
-  return new EmbedBuilder()
+  const embed =
+    new EmbedBuilder()
 
-    .setTitle(
-      "CRT SIGNAL"
-    )
-
-    .setDescription(
-      coin
-    )
-
-    .addFields(
-      fields
-    )
-
-    .setColor(
-      color
-    )
-
-    .setFooter({
-
-      text:
-        CRT_CONFIG.footer ||
-        "CRT • PDYN • MEXC",
-
-    })
-
-    .setTimestamp(
-      new Date(
-        signal.timestamp
+      .setTitle(
+        "CRT SIGNAL"
       )
-    );
+
+      .setDescription(
+        coin
+      )
+
+      .addFields(
+        fields
+      )
+
+      .setColor(
+        color
+      )
+
+      .setFooter({
+
+        text:
+          CRT_CONFIG.footer ||
+          "CRT • PDYN • MEXC",
+
+      })
+
+      .setTimestamp(
+        new Date(
+          signal.timestamp
+        )
+      );
+
+  return embed;
 
 }
+
 
 // ============================================================
 // SEND CRT SIGNAL
@@ -3827,7 +4180,10 @@ async function sendCRTSignal(
       `STD ${getVolatilityState(
         data.standardDeviation
       )} | ` +
-      `STRUCTURE ${data.marketStructure?.bias || "BEARISH"}`
+      `STRUCTURE ${
+        data.marketStructure?.bias ||
+        "BEARISH"
+      }`
     );
 
   } catch (
@@ -3842,6 +4198,7 @@ async function sendCRTSignal(
   }
 
 }
+
 
 // ============================================================
 // CONCURRENCY
@@ -3912,6 +4269,7 @@ async function runWithConcurrency(
     );
 
   await Promise.all(
+
     Array.from(
       {
         length:
@@ -3919,9 +4277,11 @@ async function runWithConcurrency(
       },
       runner
     )
+
   );
 
 }
+
 
 // ============================================================
 // SCAN MEXC
@@ -4041,7 +4401,30 @@ async function scanMexc(
 
           }
 
-          await processMarket(
+          // --------------------------------------------------
+          // 5M TOP-DOWN
+          // --------------------------------------------------
+
+          if (
+            job.timeframe ===
+            "5m"
+          ) {
+
+            await processFiveMinuteMarket(
+              client,
+              job.symbol,
+              candles
+            );
+
+            return;
+
+          }
+
+          // --------------------------------------------------
+          // STANDARD TIMEFRAMES
+          // --------------------------------------------------
+
+          await processStandardMarket(
 
             client,
 
@@ -4058,7 +4441,9 @@ async function scanMexc(
         ) {
 
           console.error(
+
             `[CRT] MEXC ${job.symbol} ${job.timeframe}: ${error.message}`
+
           );
 
         }
@@ -4070,6 +4455,7 @@ async function scanMexc(
   }
 
 }
+
 
 // ============================================================
 // FULL SCAN
@@ -4092,6 +4478,7 @@ async function runFullScan(
   );
 
 }
+
 
 // ============================================================
 // START MONITOR
@@ -4181,29 +4568,23 @@ export function startCRTMonitor(
   console.log(
     `[CRT] Timeframes: ${Object.keys(
       TIMEFRAMES
-    ).join(
-      ", "
-    )}`
+    ).join(", ")}`
   );
 
   console.log(
-    "[CRT] 30m: DISABLED"
+    "[CRT] 30m: REMOVED"
   );
 
   console.log(
-    "[CRT] 5m: ENABLED"
+    "[CRT] 5m: TOP-DOWN ANALYSIS"
   );
 
   console.log(
-    "[CRT] 5m Top-Down: ENABLED"
+    `[CRT] 5m Channel: ${CHANNELS["5m"]}`
   );
 
   console.log(
-    "[CRT] 5m Top-Down: 15m → 1h → 4h → 1d"
-  );
-
-  console.log(
-    "[CRT] 5m requires ALL higher timeframes to agree."
+    "[CRT] 5m Higher TF Confirmation: 1D / 4H / 1H / 15M"
   );
 
   console.log(
@@ -4246,6 +4627,7 @@ export function startCRTMonitor(
     "============================================================"
   );
 
+
   // ----------------------------------------------------------
   // INITIAL BASELINE
   // ----------------------------------------------------------
@@ -4264,6 +4646,7 @@ export function startCRTMonitor(
 
     }
   );
+
 
   // ----------------------------------------------------------
   // CONTINUOUS SCAN
@@ -4297,6 +4680,7 @@ export function startCRTMonitor(
 
 }
 
+
 // ============================================================
 // STOP MONITOR
 // ============================================================
@@ -4324,6 +4708,7 @@ export function stopCRTMonitor() {
   );
 
 }
+
 
 // ============================================================
 // ALL CRT STATUS
@@ -4354,6 +4739,7 @@ export function getAllCRTStatuses() {
 
 }
 
+
 // ============================================================
 // TEST RACHEL FRACTAL
 // ============================================================
@@ -4378,79 +4764,6 @@ export function testRachelFractal(
 
 }
 
-// ============================================================
-// TEST TOP-DOWN ANALYSIS
-// ============================================================
-
-export async function testTopDownAnalysis(
-  symbol
-) {
-
-  try {
-
-    const candles5m =
-      await fetchMexcCandles(
-        symbol,
-        "5m"
-      );
-
-    if (
-      candles5m.length <
-      20
-    ) {
-
-      return {
-
-        confirmed:
-          false,
-
-        reason:
-          "Insufficient 5m candle data",
-      };
-
-    }
-
-    const signal =
-      findLastFilteredFractal(
-        candles5m
-      );
-
-    if (
-      !signal
-    ) {
-
-      return {
-
-        confirmed:
-          false,
-
-        reason:
-          "No confirmed 5m Rachel T fractal",
-      };
-
-    }
-
-    return await fetchTopDownAnalysis(
-      symbol,
-      signal
-    );
-
-  } catch (
-    error
-  ) {
-
-    return {
-
-      confirmed:
-        false,
-
-      reason:
-        error.message,
-    };
-
-  }
-
-}
 
 // ============================================================
 // TEST MARKET ANALYSIS
@@ -4513,9 +4826,52 @@ export function testMarketAnalysis(
       formatMarketStructure(
         marketStructure
       ),
+
   };
 
 }
+
+
+// ============================================================
+// TEST TOP-DOWN ANALYSIS
+// ============================================================
+
+export async function testTopDownAnalysis(
+  symbol,
+  fiveMinuteSignal = null
+) {
+
+  if (
+    !symbol
+  ) {
+
+    return {
+
+      confirmed:
+        false,
+
+      direction:
+        null,
+
+      confirmations:
+        {},
+
+      reason:
+        "Symbol is required",
+
+    };
+
+  }
+
+  return performTopDownAnalysis(
+    normalizeMexcSymbol(
+      symbol
+    ),
+    fiveMinuteSignal
+  );
+
+}
+
 
 // ============================================================
 // SERVICE INFO
@@ -4545,17 +4901,19 @@ export function getCRTServiceInfo() {
         TIMEFRAMES
       ),
 
-    topDown:
-      true,
+    removedTimeframes:
+      [
+        "30m",
+      ],
 
-    topDownTimeframe:
-      TOP_DOWN_TIMEFRAME,
+    fiveMinuteChannel:
+      CHANNELS["5m"],
 
-    topDownHigherTimeframes:
-      TOP_DOWN_HIGHER_TIMEFRAMES,
+    fiveMinuteMode:
+      "TOP-DOWN",
 
-    topDownRule:
-      "5m requires 15m + 1h + 4h + 1d to all have the same confirmed Rachel T direction",
+    topDownTimeframes:
+      TOP_DOWN_TIMEFRAMES,
 
     filterBW:
       FILTER_BW,
@@ -4598,9 +4956,11 @@ export function getCRTServiceInfo() {
 
     checkInterval:
       CHECK_INTERVAL,
+
   };
 
 }
+
 
 // ============================================================
 // STARTUP
@@ -4627,7 +4987,7 @@ console.log(
 );
 
 console.log(
-  "[CRT] 30m timeframe disabled."
+  "[CRT] 30m timeframe removed."
 );
 
 console.log(
@@ -4635,15 +4995,15 @@ console.log(
 );
 
 console.log(
-  "[CRT] 5m Top-Down analysis enabled."
+  `[CRT] 5m Discord Channel: ${CHANNELS["5m"]}`
 );
 
 console.log(
-  "[CRT] 5m Top-Down: 15m -> 1h -> 4h -> 1d."
+  "[CRT] 5m Top-Down: 1D -> 4H -> 1H -> 15M -> 5M."
 );
 
 console.log(
-  "[CRT] 5m signal requires ALL higher timeframes to confirm."
+  "[CRT] 5m requires ALL higher timeframes to confirm."
 );
 
 console.log(
