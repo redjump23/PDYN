@@ -1,208 +1,132 @@
+```javascript
 // ============================================================
-// PDYN CRT SERVICE
+// PDYN CRT TOP-DOWN SERVICE
 // ============================================================
 //
-// SOURCE:
-//   MEXC FUTURES
+// PURPOSE
+// ============================================================
 //
-// PRIMARY SIGNAL:
-//   Rachel T Fractal
+// Rachel T Fractal ONLY.
 //
-// TOP-DOWN:
+// Higher Timeframes:
 //
 //   1D
-//    ↓
 //   4H
-//    ↓
 //   1H
-//    ↓
 //   15M
-//    ↓
+//
+// Lower Timeframe:
+//
 //   5M
 //
-// IMPORTANT:
+// PostgreSQL persistence:
 //
-//   • 30M is completely removed from CRT.
-//   • Rachel T fractal is the only CRT signal.
-//   • HTF CRTs are stored by topDown.js.
-//   • Previous confirmed HTF CRTs are NOT cleared when a
-//     scan finds no new fractal.
-//   • 5M reads the latest stored HTF CRTs.
-//   • HTF is scanned before 5M.
-//   • Startup historical signals are used as baseline and
-//     are not immediately spammed to Discord.
-//   • Newer confirmed fractals replace older ones.
-//   • Duplicate signals are blocked.
-//   • Old 30M signal state is periodically cleaned.
+//   • Previous confirmed HTF fractals survive Railway restart.
+//   • Memory cache is used for fast reads.
+//   • Database is loaded asynchronously at startup.
+//   • Newer fractals replace older fractals.
+//   • Older/equal fractals are ignored.
+//   • Temporary database failures do NOT clear memory.
+//   • No TTL is applied to HTF CRT state.
 //
 // ============================================================
-
-import { EmbedBuilder } from "discord.js";
-import botConfig from "../../config/bot.js";
-
-import {
-  getFuturesSymbols,
-  getFuturesKlines,
-  getMexcServiceInfo,
-} from "./mexcService.js";
-
-import {
-  isTopDownTimeframe,
-  getTopDownTimeframes,
-  updateTopDownCRT,
-  analyzeTopDown,
-  formatTopDownCount,
-  formatHTFCRT,
-  formatHTFCRTDetails,
-  getStoredTopDownState,
-} from "./topDown.js";
-
+//
+// DOES NOT USE
 // ============================================================
-// CONFIG
+//
+//   RSI
+//   Standard Deviation
+//   Market Structure
+//   Candle containment
+//   Same-candle HTF confirmation
+//   30M
+//
 // ============================================================
 
-const CRT_CONFIG =
-  botConfig?.crt || {};
-
-const CRT_TIMEZONE =
-  CRT_CONFIG.timezone ||
-  "Asia/Manila";
+import pgDb from "../../utils/postgresDatabase.js";
 
 // ============================================================
 // TIMEFRAMES
 // ============================================================
 
-const TIMEFRAMES = {
-  "1d": 1440,
-  "4h": 240,
-  "1h": 60,
-  "15m": 15,
-  "5m": 5,
-};
-
-const TOP_DOWN_TIMEFRAMES =
-  getTopDownTimeframes();
-
-const LOWER_TIMEFRAME =
-  "5m";
-
-const SCAN_ORDER = [
+const TOP_DOWN_TIMEFRAMES = [
   "1d",
   "4h",
   "1h",
   "15m",
-  "5m",
 ];
 
 // ============================================================
-// CONFIGURATION
+// LOWER TIMEFRAME
 // ============================================================
 
-const CHECK_INTERVAL =
-  Number(
-    CRT_CONFIG.checkInterval
-  ) >= 1000
-    ? Number(
-        CRT_CONFIG.checkInterval
-      )
-    : 30000;
-
-const CANDLE_LIMIT =
-  Math.min(
-    Math.max(
-      Number(
-        CRT_CONFIG.candleLimit
-      ) || 220,
-      50
-    ),
-    1000
-  );
-
-const CONCURRENCY =
-  Math.max(
-    1,
-    Number(
-      CRT_CONFIG.concurrency
-    ) || 4
-  );
-
-const SIGNAL_CLEANUP_INTERVAL =
-  30 *
-  60 *
-  1000;
+const LOWER_TIMEFRAME = "5m";
 
 // ============================================================
-// DISCORD CHANNELS
+// ALL SUPPORTED TIMEFRAMES
 // ============================================================
 
-const CHANNELS =
-  CRT_CONFIG.channels || {};
+const ALL_TIMEFRAMES = [
+  ...TOP_DOWN_TIMEFRAMES,
+  LOWER_TIMEFRAME,
+];
 
 // ============================================================
-// STATE
+// DATABASE KEY PREFIX
 // ============================================================
 //
-// key:
+// One database key per symbol:
 //
-//   MEXC|BTC_USDT|1h
+// temp:pdyn:topdown:BTC_USDT
 //
-// value:
+// Stored value:
 //
-//   latest confirmed fractal timestamp
+// {
+//   "1d": {...},
+//   "4h": {...},
+//   "1h": {...},
+//   "15m": {...}
+// }
 //
 // ============================================================
 
-const signalState =
-  new Map();
-
-const startupBaseline =
-  new Set();
-
-let lastSignalCleanup =
-  Date.now();
+const DATABASE_KEY_PREFIX =
+  "pdyn:topdown:";
 
 // ============================================================
-// MONITOR
+// IN-MEMORY STATE
+// ============================================================
+//
+// Map<symbol, Map<timeframe, CRT>>
+//
 // ============================================================
 
-let crtMonitorStarted =
-  false;
-
-let monitorTimer =
-  null;
+const topDownState = new Map();
 
 // ============================================================
-// MEXC STATE
+// DATABASE LOAD STATE
 // ============================================================
 
-let mexcSymbolsCache =
-  null;
+let databaseLoadStarted = false;
 
-let mexcSymbolsCacheTime =
-  0;
+let databaseLoadCompleted = false;
 
-const SYMBOL_CACHE_TIME =
-  10 *
-  60 *
-  1000;
+// ============================================================
+// DATABASE WRITE QUEUE
+// ============================================================
+//
+// Prevent multiple writes for the same symbol from racing.
+//
+// ============================================================
 
-let mexcBlockedUntil =
-  0;
-
-const MEXC_BLOCK_COOLDOWN =
-  60 *
-  1000;
+const databaseWriteQueue = new Map();
 
 // ============================================================
 // NORMALIZE SYMBOL
 // ============================================================
 
-function normalizeSymbol(
-  symbol
-) {
-  return String(
-    symbol || ""
-  )
+function normalizeSymbol(symbol) {
+  return String(symbol || "")
     .trim()
     .toUpperCase();
 }
@@ -211,2252 +135,1591 @@ function normalizeSymbol(
 // NORMALIZE TIMEFRAME
 // ============================================================
 
-function normalizeTimeframe(
-  timeframe
-) {
-  return String(
-    timeframe || ""
-  )
+function normalizeTimeframe(timeframe) {
+  return String(timeframe || "")
     .trim()
     .toLowerCase();
 }
 
 // ============================================================
-// TIMEFRAME VALIDATION
+// DATABASE KEY
 // ============================================================
 
-export function isValidCRTTimeframe(
+function getDatabaseKey(symbol) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return null;
+  }
+
+  return (
+    DATABASE_KEY_PREFIX +
+    normalizedSymbol
+  );
+}
+
+// ============================================================
+// CHECK TOP-DOWN TIMEFRAME
+// ============================================================
+
+export function isTopDownTimeframe(
   timeframe
 ) {
-  return Object.prototype.hasOwnProperty.call(
-    TIMEFRAMES,
-    normalizeTimeframe(
-      timeframe
-    )
+  return TOP_DOWN_TIMEFRAMES.includes(
+    normalizeTimeframe(timeframe)
   );
 }
 
 // ============================================================
-// AVAILABLE TIMEFRAMES
+// CHECK SUPPORTED TIMEFRAME
 // ============================================================
 
-export function getAvailableCRTTimeframes() {
-  return Object.keys(
-    TIMEFRAMES
-  );
-}
-
-// ============================================================
-// ZONED TIME
-// ============================================================
-
-function getZonedParts(
-  date = new Date()
+function isSupportedTimeframe(
+  timeframe
 ) {
-  const formatter =
-    new Intl.DateTimeFormat(
-      "en-US",
-      {
-        timeZone:
-          CRT_TIMEZONE,
+  return ALL_TIMEFRAMES.includes(
+    normalizeTimeframe(timeframe)
+  );
+}
 
-        year:
-          "numeric",
+// ============================================================
+// GET SYMBOL STATE
+// ============================================================
 
-        month:
-          "2-digit",
+function getSymbolState(symbol) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
 
-        day:
-          "2-digit",
-
-        hour:
-          "2-digit",
-
-        minute:
-          "2-digit",
-
-        second:
-          "2-digit",
-
-        hourCycle:
-          "h23",
-      }
-    );
-
-  const parts =
-    formatter.formatToParts(
-      date
-    );
-
-  const result = {};
-
-  for (
-    const part of parts
-  ) {
-    if (
-      part.type !==
-      "literal"
-    ) {
-      result[
-        part.type
-      ] =
-        Number(
-          part.value
-        );
-    }
+  if (!normalizedSymbol) {
+    return null;
   }
 
-  return result;
-}
-
-// ============================================================
-// CURRENT TIME
-// ============================================================
-
-export function getCRTNow() {
-  return getZonedParts(
-    new Date()
-  );
-}
-
-// ============================================================
-// PAD
-// ============================================================
-
-function pad(
-  value
-) {
-  return String(
-    value
-  ).padStart(
-    2,
-    "0"
-  );
-}
-
-// ============================================================
-// CURRENT CRT WINDOW
-// ============================================================
-
-export function getCurrentCRT(
-  timeframe = "15m"
-) {
-  const normalized =
-    normalizeTimeframe(
-      timeframe
-    );
-
-  if (
-    !isValidCRTTimeframe(
-      normalized
-    )
-  ) {
-    throw new Error(
-      `Invalid CRT timeframe "${timeframe}".`
+  if (!topDownState.has(normalizedSymbol)) {
+    topDownState.set(
+      normalizedSymbol,
+      new Map()
     );
   }
 
-  const minutes =
-    TIMEFRAMES[
-      normalized
-    ];
+  return topDownState.get(
+    normalizedSymbol
+  );
+}
 
-  const now =
-    getCRTNow();
+// ============================================================
+// CREATE EMPTY TOP-DOWN STATE
+// ============================================================
 
-  const totalMinutes =
-    now.hour *
-      60 +
-    now.minute;
-
-  const candleStart =
-    Math.floor(
-      totalMinutes /
-        minutes
-    ) *
-    minutes;
-
-  const startHour =
-    Math.floor(
-      candleStart /
-        60
-    );
-
-  const startMinute =
-    candleStart %
-    60;
-
-  const endTotal =
-    candleStart +
-    minutes;
-
-  const endHour =
-    Math.floor(
-      endTotal /
-        60
-    ) %
-    24;
-
-  const endMinute =
-    endTotal %
-    60;
-
-  const startTimestamp =
-    Date.UTC(
-      now.year,
-      now.month - 1,
-      now.day,
-      startHour - 8,
-      startMinute,
-      0
-    );
-
-  const endTimestamp =
-    startTimestamp +
-    minutes *
-      60 *
-      1000;
-
+export function createEmptyTopDownState() {
   return {
-    timeframe:
-      normalized,
-
-    label:
-      normalized.toUpperCase(),
-
-    date:
-      `${now.year}-${pad(
-        now.month
-      )}-${pad(
-        now.day
-      )}`,
-
-    startHour,
-    startMinute,
-
-    endHour,
-    endMinute,
-
-    startTime:
-      `${pad(
-        startHour
-      )}:${pad(
-        startMinute
-      )}`,
-
-    endTime:
-      `${pad(
-        endHour
-      )}:${pad(
-        endMinute
-      )}`,
-
-    startTimestamp,
-    endTimestamp,
-
-    timezone:
-      CRT_TIMEZONE,
+    "1d": null,
+    "4h": null,
+    "1h": null,
+    "15m": null,
   };
 }
 
 // ============================================================
-// REMAINING TIME
+// NORMALIZE SIGNAL
 // ============================================================
 
-export function getRemainingTime(
-  timeframe = "15m"
-) {
-  const crt =
-    getCurrentCRT(
-      timeframe
-    );
-
-  const remaining =
-    Math.max(
-      0,
-      crt.endTimestamp -
-        Date.now()
-    );
-
-  const totalSeconds =
-    Math.floor(
-      remaining /
-        1000
-    );
-
-  const hours =
-    Math.floor(
-      totalSeconds /
-        3600
-    );
-
-  const minutes =
-    Math.floor(
-      (
-        totalSeconds %
-          3600
-      ) /
-      60
-    );
-
-  const seconds =
-    totalSeconds %
-    60;
-
-  return [
-    pad(hours),
-    pad(minutes),
-    pad(seconds),
-  ].join(":");
-}
-
-// ============================================================
-// CRT STATUS
-// ============================================================
-
-export function getCRTStatus(
-  timeframe = "15m"
-) {
-  const crt =
-    getCurrentCRT(
-      timeframe
-    );
-
-  const now =
-    getCRTNow();
-
-  return {
-    timeframe:
-      crt.timeframe,
-
-    label:
-      crt.label,
-
-    date:
-      crt.date,
-
-    timezone:
-      crt.timezone,
-
-    currentTime:
-      `${pad(
-        now.hour
-      )}:${pad(
-        now.minute
-      )}:${pad(
-        now.second
-      )}`,
-
-    start:
-      crt.startTime,
-
-    end:
-      crt.endTime,
-
-    remaining:
-      getRemainingTime(
-        timeframe
-      ),
-
-    startTimestamp:
-      crt.startTimestamp,
-
-    endTimestamp:
-      crt.endTimestamp,
-  };
-}
-
-// ============================================================
-// ALL CRT STATUS
-// ============================================================
-
-export function getAllCRTStatuses() {
-  const result = {};
-
-  for (
-    const timeframe of
-    Object.keys(
-      TIMEFRAMES
-    )
-  ) {
-    result[
-      timeframe
-    ] =
-      getCRTStatus(
-        timeframe
-      );
-  }
-
-  return result;
-}
-
-// ============================================================
-// RACHEL T TOP
-// ============================================================
-//
-// Confirmation uses five candles.
-//
-// index:
-//
-//   c4  c3  c2  c1  c0
-//
-// c2 is the confirmed fractal candle.
-//
-// ============================================================
-
-function isRachelTop(
-  candles,
-  index
-) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    index < 4 ||
-    index >=
-      candles.length
-  ) {
-    return false;
-  }
-
-  const c4 =
-    candles[
-      index - 4
-    ];
-
-  const c3 =
-    candles[
-      index - 3
-    ];
-
-  const c2 =
-    candles[
-      index - 2
-    ];
-
-  const c1 =
-    candles[
-      index - 1
-    ];
-
-  const c0 =
-    candles[
-      index
-    ];
-
-  return (
-    c4.high <
-      c2.high &&
-
-    c3.high <=
-      c2.high &&
-
-    c2.high >=
-      c1.high &&
-
-    c2.high >
-      c0.high
-  );
-}
-
-// ============================================================
-// RACHEL T BOTTOM
-// ============================================================
-
-function isRachelBottom(
-  candles,
-  index
-) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    index < 4 ||
-    index >=
-      candles.length
-  ) {
-    return false;
-  }
-
-  const c4 =
-    candles[
-      index - 4
-    ];
-
-  const c3 =
-    candles[
-      index - 3
-    ];
-
-  const c2 =
-    candles[
-      index - 2
-    ];
-
-  const c1 =
-    candles[
-      index - 1
-    ];
-
-  const c0 =
-    candles[
-      index
-    ];
-
-  return (
-    c4.low >
-      c2.low &&
-
-    c3.low >=
-      c2.low &&
-
-    c2.low <=
-      c1.low &&
-
-    c2.low <
-      c0.low
-  );
-}
-
-// ============================================================
-// FIND LAST RACHEL T FRACTAL
-// ============================================================
-
-function findLastFractal(
-  candles
-) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <
-      5
-  ) {
-    return null;
-  }
-
-  for (
-    let index =
-      candles.length -
-      1;
-    index >= 4;
-    index--
-  ) {
-    const fractalIndex =
-      index - 2;
-
-    const candle =
-      candles[
-        fractalIndex
-      ];
-
-    if (
-      isRachelTop(
-        candles,
-        index
-      )
-    ) {
-      return {
-        type:
-          "SELL",
-
-        fractalType:
-          "TOP",
-
-        index:
-          fractalIndex,
-
-        timestamp:
-          candle.timestamp,
-
-        price:
-          candle.close,
-
-        fractalPrice:
-          candle.high,
-
-        volume:
-          Number(
-            candle.volume ||
-              0
-          ),
-      };
-    }
-
-    if (
-      isRachelBottom(
-        candles,
-        index
-      )
-    ) {
-      return {
-        type:
-          "BUY",
-
-        fractalType:
-          "BOTTOM",
-
-        index:
-          fractalIndex,
-
-        timestamp:
-          candle.timestamp,
-
-        price:
-          candle.close,
-
-        fractalPrice:
-          candle.low,
-
-        volume:
-          Number(
-            candle.volume ||
-              0
-          ),
-      };
-    }
-  }
-
-  return null;
-}
-
-// ============================================================
-// FIND NEWER FRACTAL
-// ============================================================
-
-function findNewestFractalAfter(
-  candles,
-  previousTimestamp
-) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <
-      5
-  ) {
-    return null;
-  }
-
-  for (
-    let index =
-      candles.length -
-      1;
-    index >= 4;
-    index--
-  ) {
-    const fractalIndex =
-      index - 2;
-
-    const candle =
-      candles[
-        fractalIndex
-      ];
-
-    if (
-      candle.timestamp <=
-      previousTimestamp
-    ) {
-      break;
-    }
-
-    if (
-      isRachelTop(
-        candles,
-        index
-      )
-    ) {
-      return {
-        type:
-          "SELL",
-
-        fractalType:
-          "TOP",
-
-        index:
-          fractalIndex,
-
-        timestamp:
-          candle.timestamp,
-
-        price:
-          candle.close,
-
-        fractalPrice:
-          candle.high,
-
-        volume:
-          Number(
-            candle.volume ||
-              0
-          ),
-      };
-    }
-
-    if (
-      isRachelBottom(
-        candles,
-        index
-      )
-    ) {
-      return {
-        type:
-          "BUY",
-
-        fractalType:
-          "BOTTOM",
-
-        index:
-          fractalIndex,
-
-        timestamp:
-          candle.timestamp,
-
-        price:
-          candle.close,
-
-        fractalPrice:
-          candle.low,
-
-        volume:
-          Number(
-            candle.volume ||
-              0
-          ),
-      };
-    }
-  }
-
-  return null;
-}
-
-// ============================================================
-// TEST RACHEL FRACTAL
-// ============================================================
-
-export function testRachelFractal(
-  candles
-) {
-  if (
-    !Array.isArray(
-      candles
-    )
-  ) {
-    return null;
-  }
-
-  return findLastFractal(
-    candles
-  );
-}
-
-// ============================================================
-// FETCH MEXC SYMBOLS
-// ============================================================
-
-async function getSymbols() {
-  const now =
-    Date.now();
-
-  if (
-    mexcSymbolsCache &&
-    now -
-      mexcSymbolsCacheTime <
-      SYMBOL_CACHE_TIME
-  ) {
-    return mexcSymbolsCache;
-  }
-
-  if (
-    now <
-    mexcBlockedUntil
-  ) {
-    return [];
-  }
-
-  try {
-    const symbols =
-      await getFuturesSymbols();
-
-    mexcSymbolsCache =
-      [
-        ...new Set(
-          symbols
-            .map(
-              normalizeSymbol
-            )
-            .filter(
-              Boolean
-            )
-        ),
-      ];
-
-    mexcSymbolsCacheTime =
-      now;
-
-    console.log(
-      `[CRT] MEXC Futures symbols loaded: ${mexcSymbolsCache.length}`
-    );
-
-    return mexcSymbolsCache;
-
-  } catch (
-    error
-  ) {
-    console.error(
-      "[CRT] Failed to load MEXC symbols:",
-      error.message
-    );
-
-    mexcBlockedUntil =
-      Date.now() +
-      MEXC_BLOCK_COOLDOWN;
-
-    return [];
-  }
-}
-
-// ============================================================
-// FETCH CANDLES
-// ============================================================
-
-async function fetchCandles(
-  symbol,
-  timeframe
-) {
-  if (
-    Date.now() <
-    mexcBlockedUntil
-  ) {
-    return [];
-  }
-
-  try {
-    const candles =
-      await getFuturesKlines(
-        symbol,
-        timeframe,
-        CANDLE_LIMIT
-      );
-
-    if (
-      !Array.isArray(
-        candles
-      )
-    ) {
-      return [];
-    }
-
-    return candles
-      .filter(
-        candle =>
-          Number.isFinite(
-            candle.timestamp
-          ) &&
-          Number.isFinite(
-            candle.open
-          ) &&
-          Number.isFinite(
-            candle.high
-          ) &&
-          Number.isFinite(
-            candle.low
-          ) &&
-          Number.isFinite(
-            candle.close
-          )
-      )
-      .sort(
-        (
-          a,
-          b
-        ) =>
-          a.timestamp -
-          b.timestamp
-      );
-
-  } catch (
-    error
-  ) {
-    console.error(
-      `[CRT] Candle fetch failed ${symbol} ${timeframe}:`,
-      error.message
-    );
-
-    return [];
-  }
-}
-
-// ============================================================
-// FORMAT PRICE
-// ============================================================
-
-function formatPrice(
-  price
-) {
-  if (
-    !Number.isFinite(
-      price
-    )
-  ) {
-    return "N/A";
-  }
-
-  if (
-    Math.abs(
-      price
-    ) >= 1000
-  ) {
-    return price.toLocaleString(
-      "en-US",
-      {
-        minimumFractionDigits:
-          2,
-
-        maximumFractionDigits:
-          2,
-      }
-    );
-  }
-
-  if (
-    Math.abs(
-      price
-    ) >= 1
-  ) {
-    return price.toLocaleString(
-      "en-US",
-      {
-        minimumFractionDigits:
-          2,
-
-        maximumFractionDigits:
-          5,
-      }
-    );
-  }
-
-  return price.toLocaleString(
-    "en-US",
-    {
-      minimumFractionDigits:
-        4,
-
-      maximumFractionDigits:
-        8,
-    }
-  );
-}
-
-// ============================================================
-// FORMAT VOLUME
-// ============================================================
-
-function formatVolume(
-  volume
-) {
-  if (
-    !Number.isFinite(
-      volume
-    )
-  ) {
-    return "N/A";
-  }
-
-  const value =
-    Math.abs(
-      volume
-    );
-
-  if (
-    value >=
-    1000000000
-  ) {
-    return (
-      (
-        volume /
-        1000000000
-      ).toFixed(2) +
-      "B"
-    );
-  }
-
-  if (
-    value >=
-    1000000
-  ) {
-    return (
-      (
-        volume /
-        1000000
-      ).toFixed(2) +
-      "M"
-    );
-  }
-
-  if (
-    value >=
-    1000
-  ) {
-    return (
-      (
-        volume /
-        1000
-      ).toFixed(2) +
-      "K"
-    );
-  }
-
-  return Number(
-    volume
-  ).toFixed(2);
-}
-
-// ============================================================
-// FORMAT SIGNAL TIME
-// ============================================================
-
-function formatSignalTime(
-  timestamp
-) {
-  return new Intl.DateTimeFormat(
-    "en-US",
-    {
-      timeZone:
-        CRT_TIMEZONE,
-
-      year:
-        "numeric",
-
-      month:
-        "2-digit",
-
-      day:
-        "2-digit",
-
-      hour:
-        "2-digit",
-
-      minute:
-        "2-digit",
-
-      hourCycle:
-        "h23",
-    }
-  ).format(
-    new Date(
-      timestamp
-    )
-  );
-}
-
-// ============================================================
-// CREATE DISCORD EMBED
-// ============================================================
-
-function createSignalEmbed(
-  data
-) {
-  const {
-    symbol,
-    timeframe,
-    signal,
-    topDown,
-  } =
-    data;
-
-  const isBuy =
-    signal.type ===
-    "BUY";
-
-  const color =
-    isBuy
-      ? (
-          CRT_CONFIG.colors?.buy ||
-          "#57F287"
-        )
-      : (
-          CRT_CONFIG.colors?.sell ||
-          "#ED4245"
-        );
-
-  const fields = [
-    {
-      name:
-        "SIGNAL",
-
-      value:
-        isBuy
-          ? "🟢 BUY"
-          : "🔴 SELL",
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "TIMEFRAME",
-
-      value:
-        timeframe.toUpperCase(),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "FRACTAL",
-
-      value:
-        signal.fractalType,
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "PRICE",
-
-      value:
-        formatPrice(
-          signal.price
-        ),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "FRACTAL PRICE",
-
-      value:
-        formatPrice(
-          signal.fractalPrice
-        ),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "VOLUME",
-
-      value:
-        formatVolume(
-          signal.volume
-        ),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "CONFIRMED",
-
-      value:
-        formatSignalTime(
-          signal.timestamp
-        ),
-
-      inline:
-        false,
-    },
-  ];
-
-  if (
-    timeframe ===
-    LOWER_TIMEFRAME
-  ) {
-    fields.push(
-      {
-        name:
-          "TOP-DOWN",
-
-        value:
-          topDown
-            ? formatTopDownCount(
-                topDown
-              )
-            : "0/4 CONFIRMED",
-
-        inline:
-          true,
-      },
-
-      {
-        name:
-          "HTF CRT",
-
-        value:
-          topDown
-            ? formatHTFCRTDetails(
-                topDown
-              )
-            : "1D N/A • 4H N/A • 1H N/A • 15M N/A",
-
-        inline:
-          false,
-      }
-    );
-  }
-
-  return new EmbedBuilder()
-    .setTitle(
-      "CRT SIGNAL"
-    )
-
-    .setDescription(
-      symbol
-    )
-
-    .addFields(
-      fields
-    )
-
-    .setColor(
-      color
-    )
-
-    .setFooter({
-      text:
-        CRT_CONFIG.footer ||
-        "CRT • PDYN • MEXC",
-    })
-
-    .setTimestamp(
-      new Date(
-        signal.timestamp
-      )
-    );
-}
-
-// ============================================================
-// SEND SIGNAL
-// ============================================================
-
-async function sendCRTSignal(
-  client,
-  data
-) {
-  try {
-    const channelId =
-      CHANNELS[
-        data.timeframe
-      ];
-
-    if (
-      !channelId
-    ) {
-      console.warn(
-        `[CRT] No Discord channel configured for ${data.timeframe}.`
-      );
-
-      return;
-    }
-
-    const channel =
-      await client.channels.fetch(
-        channelId
-      );
-
-    if (
-      !channel ||
-      typeof channel.send !==
-        "function"
-    ) {
-      console.warn(
-        `[CRT] Invalid Discord channel: ${channelId}`
-      );
-
-      return;
-    }
-
-    const embed =
-      createSignalEmbed(
-        data
-      );
-
-    await channel.send({
-      embeds: [
-        embed,
-      ],
-    });
-
-    console.log(
-      `[CRT] SIGNAL SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.type}`
-    );
-
-  } catch (
-    error
-  ) {
-    console.error(
-      "[CRT] Discord signal error:",
-      error.message
-    );
-  }
-}
-
-// ============================================================
-// PROCESS MARKET
-// ============================================================
-
-async function processMarket(
-  client,
+function normalizeSignal(
   symbol,
   timeframe,
-  candles
+  signal
 ) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <
-      20
-  ) {
-    return;
+  if (!signal) {
+    return null;
   }
 
-  const stateKey =
-    `MEXC|${symbol}|${timeframe}`;
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
 
-  const previousTimestamp =
-    signalState.get(
-      stateKey
-    );
-
-  let signal = null;
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
 
   if (
-    Number.isFinite(
-      previousTimestamp
+    !normalizedSymbol ||
+    !isSupportedTimeframe(
+      normalizedTimeframe
     )
   ) {
-    signal =
-      findNewestFractalAfter(
-        candles,
-        previousTimestamp
-      );
-  } else {
-    signal =
-      findLastFractal(
-        candles
-      );
+    return null;
   }
 
-  // ----------------------------------------------------------
-  // NO NEW FRACTAL
-  // ----------------------------------------------------------
-  //
-  // IMPORTANT:
-  //
-  // We DO NOT clear topDown state here.
-  //
-  // This is what keeps previous HTF CRTs available to 5M.
-  //
-  // ----------------------------------------------------------
+  const timestamp =
+    Number(signal.timestamp);
+
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const type =
+    String(signal.type || "")
+      .trim()
+      .toUpperCase();
 
   if (
-    !signal
+    type !== "BUY" &&
+    type !== "SELL"
   ) {
-    return;
+    return null;
   }
 
-  const fractalCandle =
-    candles[
-      signal.index
-    ];
-
-  if (
-    !fractalCandle
-  ) {
-    return;
-  }
-
-  signal.symbol =
-    symbol;
-
-  signal.timeframe =
-    timeframe;
-
-  signal.volume =
-    Number(
-      fractalCandle.volume ||
-      0
-    );
-
-  signal.candleTimestamp =
-    fractalCandle.timestamp;
-
-  signal.candleStart =
-    fractalCandle.timestamp;
-
-  signal.candleEnd =
-    fractalCandle.timestamp +
-    TIMEFRAMES[
-      timeframe
-    ] *
-    60 *
-    1000;
-
-  // ----------------------------------------------------------
-  // STORE HTF CRT
-  // ----------------------------------------------------------
-
-  if (
-    isTopDownTimeframe(
-      timeframe
+  const fractalType =
+    String(
+      signal.fractalType ||
+        (
+          type === "BUY"
+            ? "BOTTOM"
+            : "TOP"
+        )
     )
-  ) {
-    updateTopDownCRT(
-      symbol,
-      timeframe,
-      signal
-    );
-  }
+      .trim()
+      .toUpperCase();
 
-  // ----------------------------------------------------------
-  // STARTUP BASELINE
-  // ----------------------------------------------------------
-  //
-  // First historical fractal is stored but not sent.
-  //
-  // ----------------------------------------------------------
+  const price =
+    Number(signal.price);
 
-  if (
-    !startupBaseline.has(
-      stateKey
-    )
-  ) {
-    signalState.set(
-      stateKey,
-      signal.timestamp
-    );
+  const fractalPrice =
+    Number(signal.fractalPrice);
 
-    startupBaseline.add(
-      stateKey
-    );
+  const volume =
+    Number(signal.volume);
 
-    console.log(
-      `[CRT] Baseline | ${symbol} | ${timeframe} | ${signal.type}`
-    );
+  const candleTimestamp =
+    Number(signal.candleTimestamp);
 
-    return;
-  }
+  const candleStart =
+    Number(signal.candleStart);
 
-  // ----------------------------------------------------------
-  // DUPLICATE PROTECTION
-  // ----------------------------------------------------------
+  const candleEnd =
+    Number(signal.candleEnd);
 
-  const storedTimestamp =
-    signalState.get(
-      stateKey
-    ) || 0;
+  return {
+    symbol:
+      normalizedSymbol,
 
-  if (
-    signal.timestamp <=
-    storedTimestamp
-  ) {
-    return;
-  }
+    timeframe:
+      normalizedTimeframe,
 
-  signalState.set(
-    stateKey,
-    signal.timestamp
-  );
+    type,
 
-  // ----------------------------------------------------------
-  // 5M TOP-DOWN
-  // ----------------------------------------------------------
+    fractalType,
 
-  let topDown =
-    null;
+    timestamp,
 
-  if (
-    timeframe ===
-    LOWER_TIMEFRAME
-  ) {
-    topDown =
-      analyzeTopDown(
-        symbol,
-        signal
-      );
-  }
+    price:
+      Number.isFinite(price)
+        ? price
+        : null,
 
-  // ----------------------------------------------------------
-  // SEND
-  // ----------------------------------------------------------
+    fractalPrice:
+      Number.isFinite(fractalPrice)
+        ? fractalPrice
+        : null,
 
-  await sendCRTSignal(
-    client,
-    {
-      symbol,
-      timeframe,
-      signal,
-      topDown,
-    }
-  );
-}
+    volume:
+      Number.isFinite(volume)
+        ? volume
+        : 0,
 
-// ============================================================
-// CONCURRENCY
-// ============================================================
-
-async function runWithConcurrency(
-  items,
-  concurrency,
-  worker
-) {
-  let nextIndex =
-    0;
-
-  async function runner() {
-    while (
-      true
-    ) {
-      const index =
-        nextIndex++;
-
-      if (
-        index >=
-        items.length
-      ) {
-        return;
-      }
-
-      try {
-        await worker(
-          items[
-            index
-          ]
-        );
-      } catch (
-        error
-      ) {
-        console.error(
-          "[CRT] Worker error:",
-          error.message
-        );
-      }
-    }
-  }
-
-  const workers =
-    Math.min(
-      concurrency,
-      items.length
-    );
-
-  if (
-    workers <=
-    0
-  ) {
-    return;
-  }
-
-  await Promise.all(
-    Array.from(
-      {
-        length:
-          workers,
-      },
-      runner
-    )
-  );
-}
-
-// ============================================================
-// CLEANUP
-// ============================================================
-//
-// 30M cleanup is deliberately state cleanup only.
-//
-// 30M is NOT scanned.
-//
-// 30M is NOT a CRT timeframe.
-//
-// ============================================================
-
-function cleanupOldState() {
-  const now =
-    Date.now();
-
-  if (
-    now -
-      lastSignalCleanup <
-    SIGNAL_CLEANUP_INTERVAL
-  ) {
-    return;
-  }
-
-  lastSignalCleanup =
-    now;
-
-  for (
-    const key of
-    signalState.keys()
-  ) {
-    if (
-      key.includes(
-        "|30m"
+    candleTimestamp:
+      Number.isFinite(
+        candleTimestamp
       )
-    ) {
-      signalState.delete(
-        key
-      );
+        ? candleTimestamp
+        : timestamp,
 
-      startupBaseline.delete(
-        key
-      );
-    }
-  }
+    candleStart:
+      Number.isFinite(
+        candleStart
+      )
+        ? candleStart
+        : timestamp,
 
-  console.log(
-    "[CRT] 30M legacy signal state cleanup completed."
-  );
+    candleEnd:
+      Number.isFinite(
+        candleEnd
+      )
+        ? candleEnd
+        : null,
+
+    storedAt:
+      Number.isFinite(
+        Number(signal.storedAt)
+      )
+        ? Number(signal.storedAt)
+        : Date.now(),
+  };
 }
 
 // ============================================================
-// SCAN MEXC
+// SERIALIZE SIGNAL
 // ============================================================
 
-async function scanMexc(
-  client
-) {
-  cleanupOldState();
-
-  if (
-    Date.now() <
-    mexcBlockedUntil
-  ) {
-    return;
+function serializeSignal(signal) {
+  if (!signal) {
+    return null;
   }
 
-  const symbols =
-    await getSymbols();
+  return {
+    symbol:
+      signal.symbol,
 
-  if (
-    !symbols.length
-  ) {
-    console.warn(
-      "[CRT] No MEXC Futures symbols found."
+    timeframe:
+      signal.timeframe,
+
+    type:
+      signal.type,
+
+    fractalType:
+      signal.fractalType,
+
+    timestamp:
+      signal.timestamp,
+
+    price:
+      signal.price,
+
+    fractalPrice:
+      signal.fractalPrice,
+
+    volume:
+      signal.volume,
+
+    candleTimestamp:
+      signal.candleTimestamp,
+
+    candleStart:
+      signal.candleStart,
+
+    candleEnd:
+      signal.candleEnd,
+
+    storedAt:
+      signal.storedAt,
+  };
+}
+
+// ============================================================
+// SAVE SYMBOL STATE TO POSTGRESQL
+// ============================================================
+//
+// IMPORTANT:
+//
+// This function is asynchronous, but updateTopDownCRT()
+// remains synchronous so existing crtService.js does not
+// need to use await.
+//
+// ============================================================
+
+async function persistSymbolState(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return false;
+  }
+
+  const key =
+    getDatabaseKey(
+      normalizedSymbol
     );
 
-    return;
+  if (!key) {
+    return false;
   }
 
-  // ----------------------------------------------------------
-  // IMPORTANT:
-  //
-  // HTF is processed BEFORE 5M.
-  //
-  // This allows 5M to read a newly confirmed HTF fractal
-  // during the same scan.
-  //
-  // If there is no new HTF fractal, topDown.js keeps the
-  // previous confirmed fractal.
-  //
-  // ----------------------------------------------------------
+  const symbolState =
+    topDownState.get(
+      normalizedSymbol
+    );
+
+  if (!symbolState) {
+    return false;
+  }
+
+  const payload =
+    createEmptyTopDownState();
 
   for (
     const timeframe of
-    SCAN_ORDER
+      TOP_DOWN_TIMEFRAMES
   ) {
-    if (
-      Date.now() <
-      mexcBlockedUntil
-    ) {
-      break;
-    }
-
-    const jobs =
-      symbols.map(
-        symbol => ({
-          symbol,
-          timeframe,
-        })
+    const signal =
+      symbolState.get(
+        timeframe
       );
 
-    await runWithConcurrency(
-      jobs,
-      CONCURRENCY,
-      async job => {
-        if (
-          Date.now() <
-          mexcBlockedUntil
-        ) {
-          return;
-        }
-
-        const candles =
-          await fetchCandles(
-            job.symbol,
-            job.timeframe
-          );
-
-        if (
-          candles.length <
-          20
-        ) {
-          return;
-        }
-
-        await processMarket(
-          client,
-          job.symbol,
-          job.timeframe,
-          candles
+    if (signal) {
+      payload[timeframe] =
+        serializeSignal(
+          signal
         );
-      }
-    );
+    }
   }
-}
-
-// ============================================================
-// FULL SCAN
-// ============================================================
-
-async function runFullScan(
-  client
-) {
-  console.log(
-    "[CRT] Starting MEXC CRT scan..."
-  );
 
   try {
-    await scanMexc(
-      client
+    if (
+      !pgDb ||
+      typeof pgDb.set !==
+        "function"
+    ) {
+      console.error(
+        "[TOPDOWN] PostgreSQL pgDb.set() is unavailable."
+      );
+
+      return false;
+    }
+
+    await pgDb.set(
+      key,
+      payload
     );
-  } catch (
-    error
-  ) {
+
+    return true;
+  } catch (error) {
     console.error(
-      "[CRT] MEXC CRT scan failed:",
-      error.message
+      `[TOPDOWN] PostgreSQL save failed for ${normalizedSymbol}:`,
+      error?.message ||
+        error
     );
+
+    return false;
+  }
+}
+
+// ============================================================
+// QUEUE DATABASE WRITE
+// ============================================================
+//
+// Prevent overlapping writes for the same symbol.
+//
+// ============================================================
+
+function queueDatabaseWrite(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return;
   }
 
-  console.log(
-    "[CRT] MEXC CRT scan completed."
+  const previousPromise =
+    databaseWriteQueue.get(
+      normalizedSymbol
+    ) || Promise.resolve();
+
+  const nextPromise =
+    previousPromise
+      .catch(
+        () => {}
+      )
+      .then(
+        () =>
+          persistSymbolState(
+            normalizedSymbol
+          )
+      )
+      .catch(
+        error => {
+          console.error(
+            `[TOPDOWN] Database queue error ${normalizedSymbol}:`,
+            error?.message ||
+              error
+          );
+        }
+      );
+
+  databaseWriteQueue.set(
+    normalizedSymbol,
+    nextPromise
+  );
+
+  nextPromise.finally(
+    () => {
+      if (
+        databaseWriteQueue.get(
+          normalizedSymbol
+        ) === nextPromise
+      ) {
+        databaseWriteQueue.delete(
+          normalizedSymbol
+        );
+      }
+    }
   );
 }
 
 // ============================================================
-// START MONITOR
+// LOAD ONE SYMBOL FROM POSTGRESQL
 // ============================================================
 
-export function startCRTMonitor(
-  client
+async function loadSymbolFromDatabase(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return false;
+  }
+
+  const key =
+    getDatabaseKey(
+      normalizedSymbol
+    );
+
+  if (!key) {
+    return false;
+  }
+
+  try {
+    if (
+      !pgDb ||
+      typeof pgDb.get !==
+        "function"
+    ) {
+      console.error(
+        "[TOPDOWN] PostgreSQL pgDb.get() is unavailable."
+      );
+
+      return false;
+    }
+
+    const stored =
+      await pgDb.get(
+        key
+      );
+
+    if (
+      !stored ||
+      typeof stored !==
+        "object"
+    ) {
+      return false;
+    }
+
+    const symbolState =
+      getSymbolState(
+        normalizedSymbol
+      );
+
+    if (!symbolState) {
+      return false;
+    }
+
+    let loadedCount = 0;
+
+    for (
+      const timeframe of
+        TOP_DOWN_TIMEFRAMES
+    ) {
+      const storedSignal =
+        stored[
+          timeframe
+        ];
+
+      if (!storedSignal) {
+        continue;
+      }
+
+      const normalizedSignal =
+        normalizeSignal(
+          normalizedSymbol,
+          timeframe,
+          storedSignal
+        );
+
+      if (!normalizedSignal) {
+        continue;
+      }
+
+      const previous =
+        symbolState.get(
+          timeframe
+        );
+
+      if (
+        !previous ||
+        normalizedSignal.timestamp >
+          previous.timestamp
+      ) {
+        symbolState.set(
+          timeframe,
+          normalizedSignal
+        );
+
+        loadedCount++;
+      }
+    }
+
+    if (loadedCount > 0) {
+      console.log(
+        `[TOPDOWN] PostgreSQL restored ${normalizedSymbol}: ${loadedCount} HTF CRT(s)`
+      );
+
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error(
+      `[TOPDOWN] PostgreSQL load failed for ${normalizedSymbol}:`,
+      error?.message ||
+        error
+    );
+
+    return false;
+  }
+}
+
+// ============================================================
+// LOAD ALL TOP-DOWN STATE
+// ============================================================
+//
+// The existing database layer may not expose a convenient
+// "get all top-down keys" method.
+//
+// Therefore:
+//
+// 1. Existing in-memory state is always safe.
+// 2. Known symbols can be restored when requested.
+// 3. New signals are persisted immediately.
+//
+// ============================================================
+
+export async function loadTopDownState(
+  symbols = []
 ) {
   if (
-    crtMonitorStarted
+    databaseLoadStarted &&
+    databaseLoadCompleted
   ) {
-    console.warn(
-      "[CRT] Monitor already running."
-    );
-
-    return;
+    return true;
   }
 
-  if (
-    CRT_CONFIG.enabled ===
-    false
-  ) {
-    console.log(
-      "[CRT] CRT disabled."
-    );
-
-    return;
-  }
-
-  if (
-    CRT_CONFIG.autoAlerts ===
-    false
-  ) {
-    console.log(
-      "[CRT] CRT auto alerts disabled."
-    );
-
-    return;
-  }
-
-  if (
-    !client
-  ) {
-    console.error(
-      "[CRT] Discord client missing."
-    );
-
-    return;
-  }
-
-  crtMonitorStarted =
+  databaseLoadStarted =
     true;
 
-  console.log(
-    "============================================================"
+  const normalizedSymbols = [
+    ...new Set(
+      (
+        Array.isArray(symbols)
+          ? symbols
+          : []
+      )
+        .map(
+          normalizeSymbol
+        )
+        .filter(Boolean)
+    ),
+  ];
+
+  try {
+    for (
+      const symbol of
+        normalizedSymbols
+    ) {
+      await loadSymbolFromDatabase(
+        symbol
+      );
+    }
+
+    databaseLoadCompleted =
+      true;
+
+    console.log(
+      `[TOPDOWN] PostgreSQL state load completed | symbols: ${normalizedSymbols.length}`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "[TOPDOWN] PostgreSQL startup load failed:",
+      error?.message ||
+        error
+    );
+
+    databaseLoadCompleted =
+      false;
+
+    return false;
+  }
+}
+
+// ============================================================
+// ENSURE SYMBOL DATABASE STATE
+// ============================================================
+//
+// Called when a symbol is first encountered.
+//
+// It loads the persisted state once, but does not block the
+// synchronous CRT update API.
+//
+// ============================================================
+
+function ensureSymbolDatabaseLoad(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return;
+  }
+
+  const symbolState =
+    getSymbolState(
+      normalizedSymbol
+    );
+
+  if (!symbolState) {
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Marker stored directly on the Map object.
+  // ----------------------------------------------------------
+
+  if (
+    symbolState.__databaseLoaded
+  ) {
+    return;
+  }
+
+  Object.defineProperty(
+    symbolState,
+    "__databaseLoaded",
+    {
+      value:
+        true,
+      writable:
+        true,
+      configurable:
+        true,
+      enumerable:
+        false,
+    }
   );
 
-  console.log(
-    "[CRT] CRT SIGNAL MONITOR STARTED"
-  );
-
-  console.log(
-    "[CRT] Provider: MEXC FUTURES"
-  );
-
-  console.log(
-    "[CRT] Rachel T Fractals: ENABLED"
-  );
-
-  console.log(
-    "[CRT] HTF: 1D -> 4H -> 1H -> 15M"
-  );
-
-  console.log(
-    "[CRT] Lower timeframe: 5M"
-  );
-
-  console.log(
-    "[CRT] 30M: REMOVED"
-  );
-
-  console.log(
-    "[CRT] Persistent previous HTF CRT: ENABLED"
-  );
-
-  console.log(
-    `[CRT] Check interval: ${CHECK_INTERVAL}ms`
-  );
-
-  console.log(
-    "============================================================"
-  );
-
-  runFullScan(
-    client
+  loadSymbolFromDatabase(
+    normalizedSymbol
   ).catch(
     error => {
       console.error(
-        "[CRT] Initial scan failed:",
-        error.message
+        `[TOPDOWN] Background database restore failed ${normalizedSymbol}:`,
+        error?.message ||
+          error
       );
     }
   );
-
-  monitorTimer =
-    setInterval(
-      () => {
-        runFullScan(
-          client
-        ).catch(
-          error => {
-            console.error(
-              "[CRT] Full scan error:",
-              error.message
-            );
-          }
-        );
-      },
-      CHECK_INTERVAL
-    );
 }
 
 // ============================================================
-// STOP MONITOR
+// STORE / UPDATE CRT
+// ============================================================
+//
+// IMPORTANT:
+//
+// This function remains synchronous.
+//
+// crtService.js currently calls:
+//
+//   updateTopDownCRT(...)
+//
+// without await.
+//
+// Therefore database persistence happens asynchronously.
+//
 // ============================================================
 
-export function stopCRTMonitor() {
-  if (
-    monitorTimer
-  ) {
-    clearInterval(
-      monitorTimer
-    );
+export function updateTopDownCRT(
+  symbol,
+  timeframe,
+  signal
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
 
-    monitorTimer =
-      null;
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (
+    !normalizedSymbol ||
+    !isTopDownTimeframe(
+      normalizedTimeframe
+    )
+  ) {
+    return false;
   }
 
-  crtMonitorStarted =
-    false;
+  const normalizedSignal =
+    normalizeSignal(
+      normalizedSymbol,
+      normalizedTimeframe,
+      signal
+    );
+
+  if (!normalizedSignal) {
+    return false;
+  }
+
+  const symbolState =
+    getSymbolState(
+      normalizedSymbol
+    );
+
+  if (!symbolState) {
+    return false;
+  }
+
+  const previous =
+    symbolState.get(
+      normalizedTimeframe
+    );
+
+  // ----------------------------------------------------------
+  // FIRST CONFIRMED FRACTAL
+  // ----------------------------------------------------------
+
+  if (!previous) {
+    symbolState.set(
+      normalizedTimeframe,
+      normalizedSignal
+    );
+
+    console.log(
+      `[TOPDOWN] Stored ${normalizedSymbol} ${normalizedTimeframe.toUpperCase()} ${normalizedSignal.type} fractal`
+    );
+
+    queueDatabaseWrite(
+      normalizedSymbol
+    );
+
+    return true;
+  }
+
+  // ----------------------------------------------------------
+  // OLD OR SAME FRACTAL
+  // ----------------------------------------------------------
+
+  if (
+    normalizedSignal.timestamp <=
+    previous.timestamp
+  ) {
+    return false;
+  }
+
+  // ----------------------------------------------------------
+  // NEWER FRACTAL
+  // ----------------------------------------------------------
+
+  symbolState.set(
+    normalizedTimeframe,
+    normalizedSignal
+  );
 
   console.log(
-    "[CRT] Monitor stopped."
+    `[TOPDOWN] Updated ${normalizedSymbol} ${normalizedTimeframe.toUpperCase()} ${normalizedSignal.type} fractal`
+  );
+
+  queueDatabaseWrite(
+    normalizedSymbol
+  );
+
+  return true;
+}
+
+// ============================================================
+// GET STORED CRT
+// ============================================================
+
+export function getTopDownCRT(
+  symbol,
+  timeframe
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (
+    !normalizedSymbol ||
+    !isTopDownTimeframe(
+      normalizedTimeframe
+    )
+  ) {
+    return null;
+  }
+
+  ensureSymbolDatabaseLoad(
+    normalizedSymbol
+  );
+
+  const symbolState =
+    topDownState.get(
+      normalizedSymbol
+    );
+
+  if (!symbolState) {
+    return null;
+  }
+
+  return (
+    symbolState.get(
+      normalizedTimeframe
+    ) ||
+    null
   );
 }
 
 // ============================================================
-// TEST MARKET ANALYSIS
-// ============================================================
-//
-// Kept for compatibility with existing bot commands.
-//
-// No RSI / Standard Deviation / Market Structure is used by
-// the actual CRT signal engine.
-//
+// GET ALL STORED HTF CRT
 // ============================================================
 
-export function testMarketAnalysis(
-  candles
+export function getStoredTopDownState(
+  symbol
 ) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <
-      5
-  ) {
-    return null;
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return createEmptyTopDownState();
   }
 
-  return {
-    fractal:
-      findLastFractal(
-        candles
-      ),
+  ensureSymbolDatabaseLoad(
+    normalizedSymbol
+  );
 
-    rsi:
-      null,
+  const result =
+    createEmptyTopDownState();
 
-    rsiState:
-      "DISABLED",
-
-    standardDeviation:
-      null,
-
-    marketStructure:
-      null,
-  };
-}
-
-// ============================================================
-// LEGACY COMPATIBILITY
-// ============================================================
-//
-// These functions remain available so existing imports do not
-// immediately break.
-//
-// They are NOT used for CRT confirmation.
-//
-// ============================================================
-
-export function calculateRSI(
-  candles,
-  period = 14
-) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <=
-      period
-  ) {
-    return null;
-  }
-
-  const closes =
-    candles.map(
-      candle =>
-        Number(
-          candle.close
-        )
+  const symbolState =
+    topDownState.get(
+      normalizedSymbol
     );
 
-  let gains = 0;
-  let losses = 0;
+  if (!symbolState) {
+    return result;
+  }
 
   for (
-    let i = 1;
-    i <= period;
-    i++
+    const timeframe of
+      TOP_DOWN_TIMEFRAMES
   ) {
-    const change =
-      closes[i] -
-      closes[i - 1];
+    const signal =
+      symbolState.get(
+        timeframe
+      );
 
-    if (
-      change > 0
-    ) {
-      gains +=
-        change;
-    } else {
-      losses +=
-        Math.abs(
-          change
-        );
+    if (signal) {
+      result[timeframe] = {
+        ...signal,
+      };
     }
   }
 
-  let averageGain =
-    gains / period;
+  return result;
+}
 
-  let averageLoss =
-    losses / period;
+// ============================================================
+// GET TOP-DOWN TIMEFRAMES
+// ============================================================
 
-  for (
-    let i =
-      period + 1;
-    i <
-    closes.length;
-    i++
-  ) {
-    const change =
-      closes[i] -
-      closes[i - 1];
+export function getTopDownTimeframes() {
+  return [
+    ...TOP_DOWN_TIMEFRAMES,
+  ];
+}
 
-    const gain =
-      change > 0
-        ? change
-        : 0;
+// ============================================================
+// COUNT CONFIRMED HTF CRT
+// ============================================================
 
-    const loss =
-      change < 0
-        ? Math.abs(
-            change
-          )
-        : 0;
-
-    averageGain =
-      (
-        averageGain *
-          (period - 1) +
-        gain
-      ) /
-      period;
-
-    averageLoss =
-      (
-        averageLoss *
-          (period - 1) +
-        loss
-      ) /
-      period;
-  }
-
-  if (
-    averageLoss ===
-    0
-  ) {
-    return 100;
-  }
-
-  if (
-    averageGain ===
-    0
-  ) {
+export function countTopDownConfirmed(
+  topDown
+) {
+  if (!topDown) {
     return 0;
   }
 
-  const rs =
-    averageGain /
-    averageLoss;
+  let count = 0;
 
-  return (
-    100 -
-    100 /
-      (1 + rs)
+  for (
+    const timeframe of
+      TOP_DOWN_TIMEFRAMES
+  ) {
+    if (
+      topDown[timeframe]
+    ) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+// ============================================================
+// FORMAT TOP-DOWN COUNT
+// ============================================================
+
+export function formatTopDownCount(
+  topDown
+) {
+  const count =
+    countTopDownConfirmed(
+      topDown
+    );
+
+  return `${count}/4 CONFIRMED`;
+}
+
+// ============================================================
+// FORMAT SINGLE CRT
+// ============================================================
+
+function formatSingleCRT(
+  signal
+) {
+  if (!signal) {
+    return "N/A";
+  }
+
+  return signal.type === "BUY"
+    ? "BUY"
+    : "SELL";
+}
+
+// ============================================================
+// FORMAT HTF CRT
+// ============================================================
+
+export function formatHTFCRT(
+  topDown
+) {
+  if (!topDown) {
+    return (
+      "1D N/A • " +
+      "4H N/A • " +
+      "1H N/A • " +
+      "15M N/A"
+    );
+  }
+
+  return [
+    `1D ${formatSingleCRT(
+      topDown["1d"]
+    )}`,
+
+    `4H ${formatSingleCRT(
+      topDown["4h"]
+    )}`,
+
+    `1H ${formatSingleCRT(
+      topDown["1h"]
+    )}`,
+
+    `15M ${formatSingleCRT(
+      topDown["15m"]
+    )}`,
+  ].join(
+    " • "
   );
 }
 
 // ============================================================
-// STANDARD DEVIATION COMPATIBILITY
+// FORMAT HTF CRT DETAILS
+// ============================================================
+//
+// Alias required by crtService.js.
+//
 // ============================================================
 
-export function calculateStandardDeviation(
-  candles,
-  period = 20
+export function formatHTFCRTDetails(
+  topDown
 ) {
-  if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <
-      period
-  ) {
-    return null;
-  }
+  return formatHTFCRT(
+    topDown
+  );
+}
 
-  const recent =
-    candles.slice(
-      -period
+// ============================================================
+// BUILD TOP-DOWN CHAIN
+// ============================================================
+//
+// 5M reads the latest STORED HTF fractals.
+//
+// It does NOT require fresh HTF fractals.
+//
+// ============================================================
+
+export function buildTopDownChain(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const state =
+    getStoredTopDownState(
+      normalizedSymbol
     );
 
-  const values =
-    recent.map(
-      candle =>
-        Number(
-          candle.close
-        )
+  const confirmed =
+    countTopDownConfirmed(
+      state
     );
-
-  const mean =
-    values.reduce(
-      (
-        sum,
-        value
-      ) =>
-        sum + value,
-      0
-    ) /
-    values.length;
-
-  const variance =
-    values.reduce(
-      (
-        sum,
-        value
-      ) =>
-        sum +
-        Math.pow(
-          value -
-            mean,
-          2
-        ),
-      0
-    ) /
-    values.length;
 
   return {
-    value:
-      Math.sqrt(
-        variance
-      ),
+    symbol:
+      normalizedSymbol,
 
-    mean,
+    "1d":
+      state["1d"],
 
-    state:
-      "NORMAL",
+    "4h":
+      state["4h"],
+
+    "1h":
+      state["1h"],
+
+    "15m":
+      state["15m"],
+
+    confirmed,
+
+    total:
+      TOP_DOWN_TIMEFRAMES.length,
+
+    confirmedCount:
+      confirmed,
+
+    isComplete:
+      confirmed ===
+      TOP_DOWN_TIMEFRAMES.length,
   };
 }
 
 // ============================================================
-// SERVICE INFO
+// ANALYZE TOP-DOWN
+// ============================================================
+//
+// Called when a 5M Rachel T fractal is detected.
+//
 // ============================================================
 
-export function getCRTServiceInfo() {
-  const mexc =
-    getMexcServiceInfo();
+export function analyzeTopDown(
+  symbol,
+  current5mSignal = null
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const stored =
+    getStoredTopDownState(
+      normalizedSymbol
+    );
+
+  const confirmedCount =
+    countTopDownConfirmed(
+      stored
+    );
+
+  const currentSignal =
+    normalizeSignal(
+      normalizedSymbol,
+      LOWER_TIMEFRAME,
+      current5mSignal
+    );
+
+  const chain =
+    buildTopDownChain(
+      normalizedSymbol
+    );
 
   return {
-    cryptoProvider:
-      "MEXC FUTURES",
+    symbol:
+      normalizedSymbol,
 
-    forexProvider:
-      null,
-
-    oanda:
-      false,
-
-    mexcApi:
-      mexc.futuresBaseUrl,
-
-    spot:
-      false,
-
-    timeframes:
-      Object.keys(
-        TIMEFRAMES
-      ),
-
-    removedTimeframes:
-      [
-        "30m",
-      ],
-
-    topDownTimeframes:
-      [
-        ...TOP_DOWN_TIMEFRAMES,
-      ],
-
-    lowerTimeframe:
+    timeframe:
       LOWER_TIMEFRAME,
 
-    rachelTFractal:
-      true,
+    current5m:
+      currentSignal,
 
-    rsi:
-      false,
+    "1d":
+      stored["1d"],
 
-    standardDeviation:
-      false,
+    "4h":
+      stored["4h"],
 
-    marketStructure:
-      false,
+    "1h":
+      stored["1h"],
 
-    persistentPreviousCRT:
-      true,
+    "15m":
+      stored["15m"],
 
-    persistentHTFState:
-      true,
+    confirmed:
+      confirmedCount,
 
-    topDownCandleSynchronization:
-      false,
+    confirmedCount,
 
-    timezone:
-      CRT_TIMEZONE,
+    total:
+      TOP_DOWN_TIMEFRAMES.length,
 
-    checkInterval:
-      CHECK_INTERVAL,
+    isComplete:
+      confirmedCount ===
+      TOP_DOWN_TIMEFRAMES.length,
 
-    candleLimit:
-      CANDLE_LIMIT,
-
-    concurrency:
-      CONCURRENCY,
+    chain,
   };
 }
+
+// ============================================================
+// FORMAT TOP-DOWN DISPLAY
+// ============================================================
+
+export function formatTopDownDisplay(
+  topDown
+) {
+  if (!topDown) {
+    return (
+      "TOP-DOWN: 0/4 CONFIRMED\n" +
+      "1D: N/A\n" +
+      "4H: N/A\n" +
+      "1H: N/A\n" +
+      "15M: N/A"
+    );
+  }
+
+  const confirmed =
+    Number(
+      topDown.confirmedCount ??
+        topDown.confirmed ??
+        0
+    );
+
+  const daily =
+    topDown["1d"];
+
+  const fourHour =
+    topDown["4h"];
+
+  const oneHour =
+    topDown["1h"];
+
+  const fifteen =
+    topDown["15m"];
+
+  return [
+    `TOP-DOWN: ${confirmed}/4 CONFIRMED`,
+
+    `1D: ${formatSingleCRT(
+      daily
+    )}`,
+
+    `4H: ${formatSingleCRT(
+      fourHour
+    )}`,
+
+    `1H: ${formatSingleCRT(
+      oneHour
+    )}`,
+
+    `15M: ${formatSingleCRT(
+      fifteen
+    )}`,
+  ].join(
+    "\n"
+  );
+}
+
+// ============================================================
+// GET TOP-DOWN SUMMARY
+// ============================================================
+
+export function getTopDownSummary(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const state =
+    getStoredTopDownState(
+      normalizedSymbol
+    );
+
+  const confirmed =
+    countTopDownConfirmed(
+      state
+    );
+
+  return {
+    symbol:
+      normalizedSymbol,
+
+    confirmed,
+
+    total:
+      TOP_DOWN_TIMEFRAMES.length,
+
+    isComplete:
+      confirmed ===
+      TOP_DOWN_TIMEFRAMES.length,
+
+    display:
+      formatTopDownDisplay({
+        ...state,
+
+        confirmed,
+
+        confirmedCount:
+          confirmed,
+      }),
+  };
+}
+
+// ============================================================
+// CLEAR ONE SYMBOL
+// ============================================================
+//
+// Deliberate operation only.
+//
+// Also removes the PostgreSQL record.
+//
+// ============================================================
+
+export function clearTopDownSymbol(
+  symbol
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return false;
+  }
+
+  const deleted =
+    topDownState.delete(
+      normalizedSymbol
+    );
+
+  const key =
+    getDatabaseKey(
+      normalizedSymbol
+    );
+
+  if (
+    key &&
+    pgDb &&
+    typeof pgDb.delete ===
+      "function"
+  ) {
+    Promise.resolve(
+      pgDb.delete(
+        key
+      )
+    ).catch(
+      error => {
+        console.error(
+          `[TOPDOWN] PostgreSQL delete failed ${normalizedSymbol}:`,
+          error?.message ||
+            error
+        );
+      }
+    );
+  }
+
+  return deleted;
+}
+
+// ============================================================
+// CLEAR ONE TIMEFRAME
+// ============================================================
+
+export function clearTopDownTimeframe(
+  symbol,
+  timeframe
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (
+    !normalizedSymbol ||
+    !isTopDownTimeframe(
+      normalizedTimeframe
+    )
+  ) {
+    return false;
+  }
+
+  const symbolState =
+    topDownState.get(
+      normalizedSymbol
+    );
+
+  if (!symbolState) {
+    return false;
+  }
+
+  const deleted =
+    symbolState.delete(
+      normalizedTimeframe
+    );
+
+  if (
+    !deleted
+  ) {
+    return false;
+  }
+
+  queueDatabaseWrite(
+    normalizedSymbol
+  );
+
+  if (
+    symbolState.size === 0
+  ) {
+    topDownState.delete(
+      normalizedSymbol
+    );
+  }
+
+  return true;
+}
+
+// ============================================================
+// CLEAR EVERYTHING
+// ============================================================
+//
+// Deliberate operation only.
+//
+// WARNING:
+//
+// This clears memory state.
+//
+// Database records are also removed when the database layer
+// supports delete().
+//
+// ============================================================
+
+export async function clearAllTopDownState() {
+  const symbols =
+    getTopDownSymbols();
+
+  topDownState.clear();
+
+  databaseWriteQueue.clear();
+
+  if (
+    pgDb &&
+    typeof pgDb.delete ===
+      "function"
+  ) {
+    for (
+      const symbol of
+        symbols
+    ) {
+      const key =
+        getDatabaseKey(
+          symbol
+        );
+
+      if (!key) {
+        continue;
+      }
+
+      try {
+        await pgDb.delete(
+          key
+        );
+      } catch (error) {
+        console.error(
+          `[TOPDOWN] PostgreSQL clear failed ${symbol}:`,
+          error?.message ||
+            error
+        );
+      }
+    }
+  }
+}
+
+// ============================================================
+// GET STATE SIZE
+// ============================================================
+
+export function getTopDownStateSize() {
+  return topDownState.size;
+}
+
+// ============================================================
+// GET ALL SYMBOLS
+// ============================================================
+
+export function getTopDownSymbols() {
+  return [
+    ...topDownState.keys(),
+  ];
+}
+
+// ============================================================
+// GET DATABASE STATUS
+// ============================================================
+
+export function getTopDownDatabaseStatus() {
+  return {
+    enabled:
+      Boolean(
+        pgDb
+      ),
+
+    loadStarted:
+      databaseLoadStarted,
+
+    loadCompleted:
+      databaseLoadCompleted,
+
+    databaseKeyPrefix:
+      DATABASE_KEY_PREFIX,
+
+    persistence:
+      true,
+  };
+}
+
+// ============================================================
+// DEBUG STATE
+// ============================================================
+
+export function getTopDownDebugState() {
+  const result = {};
+
+  for (
+    const [
+      symbol,
+      symbolState,
+    ] of topDownState.entries()
+  ) {
+    result[symbol] = {};
+
+    for (
+      const timeframe of
+        TOP_DOWN_TIMEFRAMES
+    ) {
+      const signal =
+        symbolState.get(
+          timeframe
+        );
+
+      result[symbol][
+        timeframe
+      ] =
+        signal
+          ? {
+              type:
+                signal.type,
+
+              fractalType:
+                signal.fractalType,
+
+              timestamp:
+                signal.timestamp,
+
+              price:
+                signal.price,
+
+              fractalPrice:
+                signal.fractalPrice,
+
+              volume:
+                signal.volume,
+
+              candleTimestamp:
+                signal.candleTimestamp,
+
+              candleStart:
+                signal.candleStart,
+
+              candleEnd:
+                signal.candleEnd,
+
+              storedAt:
+                signal.storedAt,
+            }
+          : null;
+    }
+  }
+
+  return result;
+}
+
+// ============================================================
+// EXPORT CONSTANTS
+// ============================================================
+
+export {
+  TOP_DOWN_TIMEFRAMES,
+  LOWER_TIMEFRAME,
+  ALL_TIMEFRAMES,
+};
 
 // ============================================================
 // STARTUP
 // ============================================================
 
 console.log(
-  "[CRT] Signal service loaded."
+  "[TOPDOWN] Rachel T top-down service loaded."
 );
 
 console.log(
-  "[CRT] MEXC Futures enabled."
+  `[TOPDOWN] HTF: ${TOP_DOWN_TIMEFRAMES.join(
+    " -> "
+  )}`
 );
 
 console.log(
-  "[CRT] Rachel T Fractals enabled."
+  "[TOPDOWN] Lower timeframe: 5M"
 );
 
 console.log(
-  "[CRT] HTF: 1D -> 4H -> 1H -> 15M"
+  "[TOPDOWN] PostgreSQL persistence: ENABLED"
 );
 
 console.log(
-  "[CRT] Lower timeframe: 5M"
+  "[TOPDOWN] Persistent previous fractal: ENABLED"
 );
 
 console.log(
-  "[CRT] 30M removed."
+  "[TOPDOWN] HTF candle synchronization: DISABLED"
 );
 
 console.log(
-  "[CRT] Persistent previous HTF CRT enabled."
+  "[TOPDOWN] Rachel T fractal only: ENABLED"
 );
 
 console.log(
-  "[CRT] RSI disabled."
+  "[TOPDOWN] RSI: DISABLED"
 );
 
 console.log(
-  "[CRT] Standard Deviation disabled."
+  "[TOPDOWN] Standard Deviation: DISABLED"
 );
 
 console.log(
-  "[CRT] Market Structure disabled."
+  "[TOPDOWN] Market Structure: DISABLED"
 );
 
 console.log(
-  "[CRT] Top-down module enabled."
+  "[TOPDOWN] 30M: REMOVED"
 );
 ```
