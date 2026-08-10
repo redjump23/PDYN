@@ -16,30 +16,38 @@
 //   15M
 //   5M
 //
+// SIGNAL ROUTING:
+//
+//   1D  -> 1D Discord channel
+//   4H  -> 4H Discord channel
+//   1H  -> 1H Discord channel
+//   15M -> 15M Discord channel
+//   5M  -> 5M Discord channel
+//
 // IMPORTANT:
 //
+//   • Rachel T Fractal is the ONLY signal confirmation.
+//   • RSI is DISPLAY ONLY.
+//   • Standard Deviation is DISPLAY ONLY.
+//   • Market Structure is DISPLAY ONLY.
+//   • RSI does NOT create CRT signals.
+//   • Standard Deviation does NOT create CRT signals.
+//   • Market Structure does NOT create CRT signals.
 //   • 30M is completely removed.
-//   • Rachel T Fractal is the ONLY signal trigger.
-//   • RSI is INFORMATION ONLY.
-//   • Standard Deviation is INFORMATION ONLY.
-//   • Market Structure is INFORMATION ONLY.
-//   • Candle direction is INFORMATION ONLY.
-//   • Volume is INFORMATION ONLY.
-//   • HTF CRT state is stored by topDown.js.
-//   • PostgreSQL persistence is handled by topDown.js.
-//   • Previous HTF fractals are never cleared because of
-//     a temporary scan/data problem.
-//   • 5M reads the latest stored HTF fractals.
-//   • HTF is scanned before 5M.
-//   • Startup historical fractals are baseline only.
-//   • Startup baseline signals are NOT immediately sent.
-//   • Newer fractals replace older fractals.
-//   • Duplicate signals are blocked.
 //   • Only CLOSED candles are used for fractal confirmation.
+//   • HTF state is stored by topDown.js.
+//   • topDown.js persists HTF state to PostgreSQL.
+//   • 5M reads the latest stored HTF state.
+//   • Duplicate fractal timestamps are blocked.
+//   • A newer fractal replaces the previous fractal.
+//   • Temporary MEXC/API errors do NOT clear previous state.
 //
 // ============================================================
 
-import { EmbedBuilder } from "discord.js";
+import {
+  EmbedBuilder,
+} from "discord.js";
+
 import botConfig from "../../config/bot.js";
 
 import {
@@ -55,7 +63,8 @@ import {
   analyzeTopDown,
   formatTopDownCount,
   formatHTFCRTDetails,
-  getStoredTopDownState,
+  getTopDownCRT,
+  loadTopDownPersistence,
 } from "./topDown.js";
 
 // ============================================================
@@ -63,7 +72,8 @@ import {
 // ============================================================
 
 const CRT_CONFIG =
-  botConfig?.crt || {};
+  botConfig?.crt ||
+  {};
 
 const CRT_TIMEZONE =
   CRT_CONFIG.timezone ||
@@ -74,18 +84,55 @@ const CRT_TIMEZONE =
 // ============================================================
 
 const TIMEFRAMES = {
-  "1d": 1440,
-  "4h": 240,
-  "1h": 60,
-  "15m": 15,
-  "5m": 5,
+  "1d":
+    1440,
+
+  "4h":
+    240,
+
+  "1h":
+    60,
+
+  "15m":
+    15,
+
+  "5m":
+    5,
 };
+
+// ============================================================
+// TOP-DOWN TIMEFRAMES
+// ============================================================
 
 const TOP_DOWN_TIMEFRAMES =
   getTopDownTimeframes();
 
+// ============================================================
+// LOWER TIMEFRAME
+// ============================================================
+
 const LOWER_TIMEFRAME =
   "5m";
+
+// ============================================================
+// SCAN ORDER
+// ============================================================
+//
+// IMPORTANT:
+//
+// HTF is scanned first.
+//
+// This means:
+//
+//   1D
+//   4H
+//   1H
+//   15M
+//   5M
+//
+// 5M can immediately read any newly updated HTF state.
+//
+// ============================================================
 
 const SCAN_ORDER = [
   "1d",
@@ -96,55 +143,7 @@ const SCAN_ORDER = [
 ];
 
 // ============================================================
-// INDICATOR SETTINGS
-// ============================================================
-
-const RSI_PERIOD =
-  Number(
-    CRT_CONFIG.rsiPeriod
-  ) > 0
-    ? Number(
-        CRT_CONFIG.rsiPeriod
-      )
-    : 14;
-
-const RSI_OVERBOUGHT =
-  Number(
-    CRT_CONFIG.rsiOverbought
-  ) > 0
-    ? Number(
-        CRT_CONFIG.rsiOverbought
-      )
-    : 70;
-
-const RSI_OVERSOLD =
-  Number(
-    CRT_CONFIG.rsiOversold
-  ) >= 0
-    ? Number(
-        CRT_CONFIG.rsiOversold
-      )
-    : 30;
-
-const STD_DEV_PERIOD =
-  Number(
-    CRT_CONFIG.standardDeviationPeriod
-  ) > 0
-    ? Number(
-        CRT_CONFIG.standardDeviationPeriod
-      )
-    : 20;
-
-const MARKET_STRUCTURE_LOOKBACK =
-  Math.max(
-    20,
-    Number(
-      CRT_CONFIG.marketStructureLookback
-    ) || 80
-  );
-
-// ============================================================
-// CONFIGURATION
+// CHECK INTERVAL
 // ============================================================
 
 const CHECK_INTERVAL =
@@ -155,6 +154,10 @@ const CHECK_INTERVAL =
         CRT_CONFIG.checkInterval
       )
     : 30000;
+
+// ============================================================
+// CANDLE LIMIT
+// ============================================================
 
 const CANDLE_LIMIT =
   Math.min(
@@ -167,16 +170,21 @@ const CANDLE_LIMIT =
     1000
   );
 
+// ============================================================
+// CONCURRENCY
+// ============================================================
+
 const CONCURRENCY =
   Math.max(
     1,
-    Math.min(
-      Number(
-        CRT_CONFIG.concurrency
-      ) || 3,
-      10
-    )
+    Number(
+      CRT_CONFIG.concurrency
+    ) || 4
   );
+
+// ============================================================
+// SIGNAL CLEANUP
+// ============================================================
 
 const SIGNAL_CLEANUP_INTERVAL =
   30 *
@@ -201,26 +209,12 @@ const CHANNELS =
 //
 // value:
 //
-//   latest confirmed fractal timestamp
+//   latest sent fractal timestamp
 //
 // ============================================================
 
 const signalState =
   new Map();
-
-// ============================================================
-// STARTUP BASELINE
-// ============================================================
-
-const startupBaseline =
-  new Set();
-
-// ============================================================
-// CLEANUP
-// ============================================================
-
-let lastSignalCleanup =
-  Date.now();
 
 // ============================================================
 // MONITOR STATE
@@ -231,9 +225,6 @@ let crtMonitorStarted =
 
 let monitorTimer =
   null;
-
-let scanRunning =
-  false;
 
 // ============================================================
 // MEXC STATE
@@ -254,8 +245,15 @@ let mexcBlockedUntil =
   0;
 
 const MEXC_BLOCK_COOLDOWN =
-  30 *
+  60 *
   1000;
+
+// ============================================================
+// CLEANUP STATE
+// ============================================================
+
+let lastSignalCleanup =
+  Date.now();
 
 // ============================================================
 // NORMALIZE SYMBOL
@@ -286,7 +284,7 @@ function normalizeTimeframe(
 }
 
 // ============================================================
-// TIMEFRAME VALIDATION
+// VALIDATE TIMEFRAME
 // ============================================================
 
 export function isValidCRTTimeframe(
@@ -301,7 +299,7 @@ export function isValidCRTTimeframe(
 }
 
 // ============================================================
-// AVAILABLE TIMEFRAMES
+// GET AVAILABLE TIMEFRAMES
 // ============================================================
 
 export function getAvailableCRTTimeframes() {
@@ -352,10 +350,12 @@ function getZonedParts(
       date
     );
 
-  const result = {};
+  const result =
+    {};
 
   for (
-    const part of parts
+    const part of
+      parts
   ) {
     if (
       part.type !==
@@ -374,7 +374,7 @@ function getZonedParts(
 }
 
 // ============================================================
-// CURRENT TIME
+// CURRENT CRT TIME
 // ============================================================
 
 export function getCRTNow() {
@@ -563,7 +563,7 @@ export function getRemainingTime(
         totalSeconds %
           3600
       ) /
-      60
+        60
     );
 
   const seconds =
@@ -634,17 +634,18 @@ export function getCRTStatus(
 }
 
 // ============================================================
-// ALL CRT STATUS
+// ALL CRT STATUSES
 // ============================================================
 
 export function getAllCRTStatuses() {
-  const result = {};
+  const result =
+    {};
 
   for (
     const timeframe of
-    Object.keys(
-      TIMEFRAMES
-    )
+      Object.keys(
+        TIMEFRAMES
+      )
   ) {
     result[
       timeframe
@@ -658,49 +659,16 @@ export function getAllCRTStatuses() {
 }
 
 // ============================================================
-// CLOSED CANDLE CHECK
-// ============================================================
-
-function isClosedCandle(
-  candle
-) {
-  if (!candle) {
-    return false;
-  }
-
-  if (
-    candle.closed ===
-    true
-  ) {
-    return true;
-  }
-
-  const closeTime =
-    Number(
-      candle.closeTime
-    );
-
-  if (
-    Number.isFinite(
-      closeTime
-    )
-  ) {
-    return (
-      closeTime <=
-      Date.now()
-    );
-  }
-
-  return false;
-}
-
-// ============================================================
 // RACHEL T TOP
 // ============================================================
 //
-// c4 c3 c2 c1 c0
+// Five-candle confirmation:
+//
+//   c4  c3  c2  c1  c0
 //
 // c2 = fractal candle
+//
+// c0 MUST be CLOSED.
 //
 // ============================================================
 
@@ -745,11 +713,8 @@ function isRachelTop(
     ];
 
   if (
-    !isClosedCandle(c4) ||
-    !isClosedCandle(c3) ||
-    !isClosedCandle(c2) ||
-    !isClosedCandle(c1) ||
-    !isClosedCandle(c0)
+    c0.closed ===
+    false
   ) {
     return false;
   }
@@ -814,11 +779,8 @@ function isRachelBottom(
     ];
 
   if (
-    !isClosedCandle(c4) ||
-    !isClosedCandle(c3) ||
-    !isClosedCandle(c2) ||
-    !isClosedCandle(c1) ||
-    !isClosedCandle(c0)
+    c0.closed ===
+    false
   ) {
     return false;
   }
@@ -844,153 +806,90 @@ function isRachelBottom(
 
 function buildFractalSignal(
   candles,
-  index,
-  timeframe
+  fractalIndex,
+  type
 ) {
-  if (
-    !Array.isArray(
-      candles
-    )
-  ) {
-    return null;
-  }
-
   const candle =
-    candles[index];
+    candles[
+      fractalIndex
+    ];
 
   if (
-    !candle ||
-    !isClosedCandle(
-      candle
-    )
+    !candle
   ) {
     return null;
   }
 
-  const timestamp =
-    Number(
-      candle.timestamp ??
-      candle.openTime
-    );
+  return {
+    type:
+      type ===
+      "TOP"
+        ? "SELL"
+        : "BUY",
 
-  if (
-    !Number.isFinite(
-      timestamp
-    )
-  ) {
-    return null;
-  }
+    fractalType:
+      type,
 
-  const close =
-    Number(
-      candle.close
-    );
+    index:
+      fractalIndex,
 
-  const high =
-    Number(
-      candle.high
-    );
+    timestamp:
+      Number(
+        candle.timestamp
+      ),
 
-  const low =
-    Number(
-      candle.low
-    );
+    price:
+      Number(
+        candle.close
+      ),
 
-  const volume =
-    Number(
-      candle.volume ??
-      0
-    );
+    fractalPrice:
+      type ===
+      "TOP"
+        ? Number(
+            candle.high
+          )
+        : Number(
+            candle.low
+          ),
 
-  if (
-    isRachelTop(
-      candles,
-      index + 2
-    )
-  ) {
-    return {
-      type:
-        "SELL",
+    volume:
+      Number(
+        candle.volume ||
+          0
+      ),
 
-      fractalType:
-        "TOP",
+    open:
+      Number(
+        candle.open
+      ),
 
-      index,
+    high:
+      Number(
+        candle.high
+      ),
 
-      timestamp,
+    low:
+      Number(
+        candle.low
+      ),
 
-      price:
-        Number.isFinite(
-          close
-        )
-          ? close
-          : null,
-
-      fractalPrice:
-        Number.isFinite(
-          high
-        )
-          ? high
-          : null,
-
-      volume:
-        Number.isFinite(
-          volume
-        )
-          ? volume
-          : 0,
-
-      timeframe,
-    };
-  }
-
-  if (
-    isRachelBottom(
-      candles,
-      index + 2
-    )
-  ) {
-    return {
-      type:
-        "BUY",
-
-      fractalType:
-        "BOTTOM",
-
-      index,
-
-      timestamp,
-
-      price:
-        Number.isFinite(
-          close
-        )
-          ? close
-          : null,
-
-      fractalPrice:
-        Number.isFinite(
-          low
-        )
-          ? low
-          : null,
-
-      volume:
-        Number.isFinite(
-          volume
-        )
-          ? volume
-          : 0,
-
-      timeframe,
-    };
-  }
-
-  return null;
+    close:
+      Number(
+        candle.close
+      ),
+  };
 }
 
 // ============================================================
-// FIND LAST FRACTAL
+// FIND LAST CONFIRMED FRACTAL
+// ============================================================
+//
+// Searches backward.
+//
+// Only CLOSED confirmation candles
+// are accepted.
+//
 // ============================================================
 
 function findLastFractal(
@@ -1010,23 +909,38 @@ function findLastFractal(
     let index =
       candles.length -
       1;
+
     index >= 4;
+
     index--
   ) {
     const fractalIndex =
       index - 2;
 
-    const signal =
-      buildFractalSignal(
+    if (
+      isRachelTop(
+        candles,
+        index
+      )
+    ) {
+      return buildFractalSignal(
         candles,
         fractalIndex,
-        null
+        "TOP"
       );
+    }
 
     if (
-      signal
+      isRachelBottom(
+        candles,
+        index
+      )
     ) {
-      return signal;
+      return buildFractalSignal(
+        candles,
+        fractalIndex,
+        "BOTTOM"
+      );
     }
   }
 
@@ -1057,8 +971,10 @@ function findNewestFractalAfter(
   for (
     let index =
       4;
+
     index <
-    candles.length;
+      candles.length;
+
     index++
   ) {
     const fractalIndex =
@@ -1069,45 +985,51 @@ function findNewestFractalAfter(
         fractalIndex
       ];
 
-    const timestamp =
-      Number(
-        candle?.timestamp ??
-        candle?.openTime
-      );
+    if (
+      !candle
+    ) {
+      continue;
+    }
 
     if (
-      !Number.isFinite(
-        timestamp
+      Number(
+        candle.timestamp
+      ) <=
+      Number(
+        previousTimestamp
       )
     ) {
       continue;
     }
 
     if (
-      timestamp <=
-      previousTimestamp
+      isRachelTop(
+        candles,
+        index
+      )
     ) {
+      newest =
+        buildFractalSignal(
+          candles,
+          fractalIndex,
+          "TOP"
+        );
+
       continue;
     }
 
-    const signal =
-      buildFractalSignal(
-        candles,
-        fractalIndex,
-        null
-      );
-
     if (
-      signal
+      isRachelBottom(
+        candles,
+        index
+      )
     ) {
-      if (
-        !newest ||
-        signal.timestamp >
-          newest.timestamp
-      ) {
-        newest =
-          signal;
-      }
+      newest =
+        buildFractalSignal(
+          candles,
+          fractalIndex,
+          "BOTTOM"
+        );
     }
   }
 
@@ -1137,10 +1059,16 @@ export function testRachelFractal(
 // ============================================================
 // RSI
 // ============================================================
+//
+// DISPLAY ONLY.
+//
+// RSI DOES NOT CREATE SIGNALS.
+//
+// ============================================================
 
 export function calculateRSI(
   candles,
-  period = RSI_PERIOD
+  period = 14
 ) {
   if (
     !Array.isArray(
@@ -1166,13 +1094,16 @@ export function calculateRSI(
 
   if (
     closes.length <=
-    period
+      period
   ) {
     return null;
   }
 
-  let gains = 0;
-  let losses = 0;
+  let gains =
+    0;
+
+  let losses =
+    0;
 
   for (
     let i = 1;
@@ -1207,8 +1138,10 @@ export function calculateRSI(
   for (
     let i =
       period + 1;
+
     i <
-    closes.length;
+      closes.length;
+
     i++
   ) {
     const change =
@@ -1230,7 +1163,10 @@ export function calculateRSI(
     averageGain =
       (
         averageGain *
-          (period - 1) +
+          (
+            period -
+            1
+          ) +
         gain
       ) /
       period;
@@ -1238,7 +1174,10 @@ export function calculateRSI(
     averageLoss =
       (
         averageLoss *
-          (period - 1) +
+          (
+            period -
+            1
+          ) +
         loss
       ) /
       period;
@@ -1287,16 +1226,33 @@ function getRSIState(
     return "Neutral";
   }
 
+  const period =
+    Number(
+      CRT_CONFIG.rsi?.period
+    ) || 14;
+
+  const overbought =
+    Number(
+      CRT_CONFIG.rsi?.overbought
+    ) || 70;
+
+  const oversold =
+    Number(
+      CRT_CONFIG.rsi?.oversold
+    ) || 30;
+
+  void period;
+
   if (
     rsi >=
-    RSI_OVERBOUGHT
+    overbought
   ) {
     return "Overbought";
   }
 
   if (
     rsi <=
-    RSI_OVERSOLD
+    oversold
   ) {
     return "Oversold";
   }
@@ -1307,10 +1263,14 @@ function getRSIState(
 // ============================================================
 // STANDARD DEVIATION
 // ============================================================
+//
+// DISPLAY ONLY.
+//
+// ============================================================
 
 export function calculateStandardDeviation(
   candles,
-  period = STD_DEV_PERIOD
+  period = 20
 ) {
   if (
     !Array.isArray(
@@ -1352,8 +1312,7 @@ export function calculateStandardDeviation(
         sum,
         value
       ) =>
-        sum +
-        value,
+        sum + value,
       0
     ) /
     values.length;
@@ -1388,196 +1347,146 @@ export function calculateStandardDeviation(
 }
 
 // ============================================================
-// CANDLE DIRECTION
+// MARKET STRUCTURE
+// ============================================================
+//
+// DISPLAY ONLY.
+//
+// Uses recent confirmed swing points.
+//
+// Bullish:
+//   Higher High + Higher Low
+//
+// Bearish:
+//   Lower High + Lower Low
+//
+// Otherwise uses recent close direction.
+//
 // ============================================================
 
-function getCandleDirection(
-  candle
+function findSwingHighs(
+  candles
 ) {
-  if (
-    !candle
+  const swings =
+    [];
+
+  for (
+    let i = 2;
+
+    i <
+      candles.length -
+        2;
+
+    i++
   ) {
-    return "Neutral";
+    const left1 =
+      candles[
+        i - 1
+      ];
+
+    const left2 =
+      candles[
+        i - 2
+      ];
+
+    const current =
+      candles[i];
+
+    const right1 =
+      candles[
+        i + 1
+      ];
+
+    const right2 =
+      candles[
+        i + 2
+      ];
+
+    if (
+      current.high >
+        left1.high &&
+      current.high >
+        left2.high &&
+      current.high >=
+        right1.high &&
+      current.high >
+        right2.high
+    ) {
+      swings.push(
+        current
+      );
+    }
   }
 
-  const open =
-    Number(
-      candle.open
-    );
-
-  const close =
-    Number(
-      candle.close
-    );
-
-  if (
-    !Number.isFinite(
-      open
-    ) ||
-    !Number.isFinite(
-      close
-    )
-  ) {
-    return "Neutral";
-  }
-
-  if (
-    close >
-    open
-  ) {
-    return "Bullish";
-  }
-
-  if (
-    close <
-    open
-  ) {
-    return "Bearish";
-  }
-
-  return "Neutral";
+  return swings;
 }
 
 // ============================================================
-// FIND RECENT SWINGS
+// SWING LOWS
 // ============================================================
 
-function getRecentSwingPoints(
+function findSwingLows(
   candles
 ) {
-  const tops = [];
-  const bottoms = [];
-
-  if (
-    !Array.isArray(
-      candles
-    )
-  ) {
-    return {
-      tops,
-      bottoms,
-    };
-  }
-
-  const start =
-    Math.max(
-      4,
-      candles.length -
-        MARKET_STRUCTURE_LOOKBACK
-    );
+  const swings =
+    [];
 
   for (
-    let index =
-      start;
-    index <
-    candles.length;
-    index++
+    let i = 2;
+
+    i <
+      candles.length -
+        2;
+
+    i++
   ) {
-    if (
-      isRachelTop(
-        candles,
-        index
-      )
-    ) {
-      const fractalIndex =
-        index - 2;
+    const left1 =
+      candles[
+        i - 1
+      ];
 
-      const candle =
-        candles[
-          fractalIndex
-        ];
+    const left2 =
+      candles[
+        i - 2
+      ];
 
-      const high =
-        Number(
-          candle?.high
-        );
+    const current =
+      candles[i];
 
-      if (
-        Number.isFinite(
-          high
-        )
-      ) {
-        tops.push({
-          index:
-            fractalIndex,
+    const right1 =
+      candles[
+        i + 1
+      ];
 
-          timestamp:
-            Number(
-              candle.timestamp ??
-              candle.openTime
-            ),
-
-          price:
-            high,
-        });
-      }
-    }
+    const right2 =
+      candles[
+        i + 2
+      ];
 
     if (
-      isRachelBottom(
-        candles,
-        index
-      )
+      current.low <
+        left1.low &&
+      current.low <
+        left2.low &&
+      current.low <=
+        right1.low &&
+      current.low <
+        right2.low
     ) {
-      const fractalIndex =
-        index - 2;
-
-      const candle =
-        candles[
-          fractalIndex
-        ];
-
-      const low =
-        Number(
-          candle?.low
-        );
-
-      if (
-        Number.isFinite(
-          low
-        )
-      ) {
-        bottoms.push({
-          index:
-            fractalIndex,
-
-          timestamp:
-            Number(
-              candle.timestamp ??
-              candle.openTime
-            ),
-
-          price:
-            low,
-        });
-      }
+      swings.push(
+        current
+      );
     }
   }
 
-  return {
-    tops,
-    bottoms,
-  };
+  return swings;
 }
 
 // ============================================================
 // MARKET STRUCTURE
 // ============================================================
-//
-// Bullish:
-//
-//   Higher High + Higher Low
-//
-// Bearish:
-//
-//   Lower High + Lower Low
-//
-// If there is not enough confirmed swing information,
-// direction falls back to the latest closed candle.
-//
-// ============================================================
 
-export function calculateMarketStructure(
+export function getMarketStructure(
   candles
 ) {
   if (
@@ -1587,56 +1496,64 @@ export function calculateMarketStructure(
     candles.length <
       10
   ) {
-    return "Neutral";
+    return "Bullish";
   }
 
-  const {
-    tops,
-    bottoms,
-  } =
-    getRecentSwingPoints(
+  const highs =
+    findSwingHighs(
+      candles
+    );
+
+  const lows =
+    findSwingLows(
       candles
     );
 
   if (
-    tops.length >= 2 &&
-    bottoms.length >= 2
+    highs.length >=
+      2 &&
+    lows.length >=
+      2
   ) {
-    const previousTop =
-      tops[
-        tops.length - 2
+    const previousHigh =
+      highs[
+        highs.length -
+          2
       ];
 
-    const latestTop =
-      tops[
-        tops.length - 1
+    const latestHigh =
+      highs[
+        highs.length -
+          1
       ];
 
-    const previousBottom =
-      bottoms[
-        bottoms.length - 2
+    const previousLow =
+      lows[
+        lows.length -
+          2
       ];
 
-    const latestBottom =
-      bottoms[
-        bottoms.length - 1
+    const latestLow =
+      lows[
+        lows.length -
+          1
       ];
 
     const higherHigh =
-      latestTop.price >
-      previousTop.price;
+      latestHigh.high >
+      previousHigh.high;
 
     const higherLow =
-      latestBottom.price >
-      previousBottom.price;
+      latestLow.low >
+      previousLow.low;
 
     const lowerHigh =
-      latestTop.price <
-      previousTop.price;
+      latestHigh.high <
+      previousHigh.high;
 
     const lowerLow =
-      latestBottom.price <
-      previousBottom.price;
+      latestLow.low <
+      previousLow.low;
 
     if (
       higherHigh &&
@@ -1653,102 +1570,39 @@ export function calculateMarketStructure(
     }
   }
 
-  const latest =
-    candles[
-      candles.length - 1
-    ];
+  const recent =
+    candles.slice(
+      -5
+    );
 
-  return getCandleDirection(
-    latest
-  );
-}
+  const first =
+    Number(
+      recent[0]?.close
+    );
 
-// ============================================================
-// BUILD INDICATOR SNAPSHOT
-// ============================================================
+  const last =
+    Number(
+      recent[
+        recent.length -
+          1
+      ]?.close
+    );
 
-function buildIndicatorSnapshot(
-  candles,
-  signal
-) {
   if (
-    !Array.isArray(
-      candles
-    ) ||
-    !candles.length
+    Number.isFinite(
+      first
+    ) &&
+    Number.isFinite(
+      last
+    )
   ) {
-    return {
-      rsi:
-        null,
-
-      rsiState:
-        "Neutral",
-
-      volume:
-        0,
-
-      candle:
-        "Neutral",
-
-      standardDeviation:
-        null,
-
-      marketStructure:
-        "Neutral",
-    };
+    return last >=
+      first
+      ? "Bullish"
+      : "Bearish";
   }
 
-  const rsi =
-    calculateRSI(
-      candles,
-      RSI_PERIOD
-    );
-
-  const stdDev =
-    calculateStandardDeviation(
-      candles,
-      STD_DEV_PERIOD
-    );
-
-  const signalCandle =
-    signal &&
-    Number.isInteger(
-      signal.index
-    )
-      ? candles[
-          signal.index
-        ]
-      : candles[
-          candles.length - 1
-        ];
-
-  return {
-    rsi,
-
-    rsiState:
-      getRSIState(
-        rsi
-      ),
-
-    volume:
-      Number(
-        signalCandle?.volume ??
-        0
-      ),
-
-    candle:
-      getCandleDirection(
-        signalCandle
-      ),
-
-    standardDeviation:
-      stdDev,
-
-    marketStructure:
-      calculateMarketStructure(
-        candles
-      ),
-  };
+  return "Bullish";
 }
 
 // ============================================================
@@ -1779,16 +1633,6 @@ async function getSymbols() {
     const symbols =
       await getFuturesSymbols();
 
-    if (
-      !Array.isArray(
-        symbols
-      )
-    ) {
-      throw new Error(
-        "MEXC Futures symbols response was not an array."
-      );
-    }
-
     mexcSymbolsCache =
       [
         ...new Set(
@@ -1814,7 +1658,7 @@ async function getSymbols() {
     error
   ) {
     console.error(
-      "[CRT] Failed to load MEXC Futures symbols:",
+      "[CRT] Failed to load MEXC symbols:",
       error.message
     );
 
@@ -1858,50 +1702,6 @@ async function fetchCandles(
     }
 
     return candles
-      .map(
-        candle => ({
-          timestamp:
-            Number(
-              candle.timestamp ??
-              candle.openTime
-            ),
-
-          open:
-            Number(
-              candle.open
-            ),
-
-          high:
-            Number(
-              candle.high
-            ),
-
-          low:
-            Number(
-              candle.low
-            ),
-
-          close:
-            Number(
-              candle.close
-            ),
-
-          volume:
-            Number(
-              candle.volume ??
-              0
-            ),
-
-          closeTime:
-            Number(
-              candle.closeTime
-            ),
-
-          closed:
-            candle.closed ===
-            true,
-        })
-      )
       .filter(
         candle =>
           Number.isFinite(
@@ -1958,8 +1758,7 @@ function formatPrice(
   if (
     Math.abs(
       price
-    ) >=
-    1000
+    ) >= 1000
   ) {
     return price.toLocaleString(
       "en-US",
@@ -1976,8 +1775,7 @@ function formatPrice(
   if (
     Math.abs(
       price
-    ) >=
-    1
+    ) >= 1
   ) {
     return price.toLocaleString(
       "en-US",
@@ -2076,55 +1874,6 @@ function formatVolume(
 }
 
 // ============================================================
-// FORMAT RSI
-// ============================================================
-//
-// Only Overbought and Oversold are bolded.
-//
-// ============================================================
-
-function formatRSI(
-  rsiState
-) {
-  if (
-    rsiState ===
-    "Overbought"
-  ) {
-    return "**Overbought**";
-  }
-
-  if (
-    rsiState ===
-    "Oversold"
-  ) {
-    return "**Oversold**";
-  }
-
-  return "Neutral";
-}
-
-// ============================================================
-// FORMAT STD DEV
-// ============================================================
-
-function formatStandardDeviation(
-  standardDeviation
-) {
-  if (
-    !standardDeviation ||
-    !Number.isFinite(
-      standardDeviation.value
-    )
-  ) {
-    return "N/A";
-  }
-
-  return formatPrice(
-    standardDeviation.value
-  );
-}
-
-// ============================================================
 // FORMAT SIGNAL TIME
 // ============================================================
 
@@ -2133,9 +1882,7 @@ function formatSignalTime(
 ) {
   if (
     !Number.isFinite(
-      Number(
-        timestamp
-      )
+      timestamp
     )
   ) {
     return "N/A";
@@ -2162,6 +1909,9 @@ function formatSignalTime(
       minute:
         "2-digit",
 
+      second:
+        "2-digit",
+
       hourCycle:
         "h23",
     }
@@ -2170,6 +1920,131 @@ function formatSignalTime(
       timestamp
     )
   );
+}
+
+// ============================================================
+// FORMAT RSI
+// ============================================================
+//
+// Only Overbought and Oversold are bold.
+//
+// Neutral remains normal.
+//
+// ============================================================
+
+function formatRSIState(
+  state
+) {
+  if (
+    state ===
+    "Overbought"
+  ) {
+    return "**Overbought**";
+  }
+
+  if (
+    state ===
+    "Oversold"
+  ) {
+    return "**Oversold**";
+  }
+
+  return "Neutral";
+}
+
+// ============================================================
+// FORMAT CANDLE
+// ============================================================
+
+function formatCandle(
+  candle
+) {
+  if (
+    !candle
+  ) {
+    return "N/A";
+  }
+
+  return (
+    `O ${formatPrice(
+      Number(
+        candle.open
+      )
+    )} • ` +
+    `H ${formatPrice(
+      Number(
+        candle.high
+      )
+    )} • ` +
+    `L ${formatPrice(
+      Number(
+        candle.low
+      )
+    )} • ` +
+    `C ${formatPrice(
+      Number(
+        candle.close
+      )
+    )}`
+  );
+}
+
+// ============================================================
+// CREATE SIGNAL DATA
+// ============================================================
+
+function buildDisplayData(
+  candles,
+  signal
+) {
+  const rsi =
+    calculateRSI(
+      candles,
+      Number(
+        CRT_CONFIG.rsi?.period
+      ) || 14
+    );
+
+  const rsiState =
+    getRSIState(
+      rsi
+    );
+
+  const standardDeviation =
+    calculateStandardDeviation(
+      candles,
+      20
+    );
+
+  const marketStructure =
+    getMarketStructure(
+      candles
+    );
+
+  const fractalCandle =
+    candles[
+      signal.index
+    ];
+
+  return {
+    rsi,
+
+    rsiState,
+
+    standardDeviation,
+
+    marketStructure,
+
+    candle:
+      fractalCandle,
+
+    volume:
+      Number(
+        fractalCandle?.volume ||
+          signal.volume ||
+          0
+      ),
+  };
 }
 
 // ============================================================
@@ -2183,7 +2058,7 @@ function createSignalEmbed(
     symbol,
     timeframe,
     signal,
-    indicators,
+    display,
     topDown,
   } =
     data;
@@ -2195,22 +2070,32 @@ function createSignalEmbed(
   const color =
     isBuy
       ? (
-          CRT_CONFIG
-            .colors
-            ?.buy ||
+          CRT_CONFIG.colors?.buy ||
           "#57F287"
         )
       : (
-          CRT_CONFIG
-            .colors
-            ?.sell ||
+          CRT_CONFIG.colors?.sell ||
           "#ED4245"
         );
 
   const rsiText =
-    formatRSI(
-      indicators?.rsiState
+    formatRSIState(
+      display.rsiState
     );
+
+  const stdText =
+    display.standardDeviation &&
+    Number.isFinite(
+      display
+        .standardDeviation
+        .value
+    )
+      ? formatPrice(
+          display
+            .standardDeviation
+            .value
+        )
+      : "N/A";
 
   const fields = [
     {
@@ -2228,21 +2113,10 @@ function createSignalEmbed(
 
     {
       name:
-        "SOURCE",
+        "SOURCE / TIMEFRAME",
 
       value:
-        "MEXC FUTURES",
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "TIMEFRAME",
-
-      value:
-        timeframe.toUpperCase(),
+        `MEXC / ${timeframe.toUpperCase()}`,
 
       inline:
         true,
@@ -2253,11 +2127,69 @@ function createSignalEmbed(
         "FRACTAL",
 
       value:
-        signal.fractalType ||
-        "N/A",
+        signal.fractalType,
 
       inline:
         true,
+    },
+
+    {
+      name:
+        "RSI",
+
+      value:
+        rsiText,
+
+      inline:
+        true,
+    },
+
+    {
+      name:
+        "VOLUME",
+
+      value:
+        formatVolume(
+          display.volume
+        ),
+
+      inline:
+        true,
+    },
+
+    {
+      name:
+        "STD DEV",
+
+      value:
+        stdText,
+
+      inline:
+        true,
+    },
+
+    {
+      name:
+        "MARKET STRUCTURE",
+
+      value:
+        display.marketStructure,
+
+      inline:
+        true,
+    },
+
+    {
+      name:
+        "CANDLE",
+
+      value:
+        formatCandle(
+          display.candle
+        ),
+
+      inline:
+        false,
     },
 
     {
@@ -2288,69 +2220,6 @@ function createSignalEmbed(
 
     {
       name:
-        "RSI",
-
-      value:
-        rsiText,
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "VOLUME",
-
-      value:
-        formatVolume(
-          indicators?.volume ??
-          signal.volume ??
-          0
-        ),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "CANDLE",
-
-      value:
-        indicators?.candle ||
-        "Neutral",
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "STD DEV",
-
-      value:
-        formatStandardDeviation(
-          indicators?.standardDeviation
-        ),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "MARKET STRUCTURE",
-
-      value:
-        indicators?.marketStructure ||
-        "Neutral",
-
-      inline:
-        true,
-    },
-
-    {
-      name:
         "CONFIRMED",
 
       value:
@@ -2363,9 +2232,9 @@ function createSignalEmbed(
     },
   ];
 
-  // ----------------------------------------------------------
-  // TOP-DOWN DETAILS
-  // ----------------------------------------------------------
+  // ==========================================================
+  // 5M TOP-DOWN
+  // ==========================================================
 
   if (
     timeframe ===
@@ -2411,11 +2280,11 @@ function createSignalEmbed(
 
   return new EmbedBuilder()
     .setTitle(
-      "CRT SIGNAL"
+      `CRT SIGNAL: ${symbol}`
     )
 
     .setDescription(
-      symbol
+      `Rachel T Fractal Confirmation`
     )
 
     .addFields(
@@ -2429,7 +2298,7 @@ function createSignalEmbed(
     .setFooter({
       text:
         CRT_CONFIG.footer ||
-        "CRT • PDYN • MEXC FUTURES",
+        "CRT • PDYN • MEXC",
     })
 
     .setTimestamp(
@@ -2456,11 +2325,11 @@ async function sendCRTSignal(
     if (
       !channelId
     ) {
-      console.warn(
-        `[CRT] No Discord channel configured for ${data.timeframe}.`
+      console.error(
+        `[CRT] NO CHANNEL CONFIGURED for ${data.timeframe}`
       );
 
-      return;
+      return false;
     }
 
     const channel =
@@ -2469,15 +2338,24 @@ async function sendCRTSignal(
       );
 
     if (
-      !channel ||
-      typeof channel.send !==
-        "function"
+      !channel
     ) {
-      console.warn(
-        `[CRT] Invalid Discord channel: ${channelId}`
+      console.error(
+        `[CRT] Channel not found: ${channelId}`
       );
 
-      return;
+      return false;
+    }
+
+    if (
+      typeof channel.send !==
+      "function"
+    ) {
+      console.error(
+        `[CRT] Channel cannot send messages: ${channelId}`
+      );
+
+      return false;
     }
 
     const embed =
@@ -2492,15 +2370,26 @@ async function sendCRTSignal(
     });
 
     console.log(
-      `[CRT] SIGNAL SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.type} | ${data.signal.fractalType}`
+      `[CRT] SIGNAL SENT | ` +
+      `${data.symbol} | ` +
+      `${data.timeframe.toUpperCase()} | ` +
+      `${data.signal.type} | ` +
+      `${data.signal.fractalType} | ` +
+      `${data.signal.timestamp}`
     );
+
+    return true;
   } catch (
     error
   ) {
     console.error(
-      "[CRT] Discord signal error:",
+      `[CRT] Discord signal error ` +
+      `${data.symbol} ` +
+      `${data.timeframe}:`,
       error.message
     );
+
+    return false;
   }
 }
 
@@ -2545,9 +2434,9 @@ async function processMarket(
   let signal =
     null;
 
-  // ----------------------------------------------------------
-  // FIND NEW FRACTAL
-  // ----------------------------------------------------------
+  // ==========================================================
+  // FIND SIGNAL
+  // ==========================================================
 
   if (
     Number.isFinite(
@@ -2566,9 +2455,9 @@ async function processMarket(
       );
   }
 
-  // ----------------------------------------------------------
-  // NO NEW FRACTAL
-  // ----------------------------------------------------------
+  // ==========================================================
+  // NO FRACTAL
+  // ==========================================================
 
   if (
     !signal
@@ -2576,20 +2465,35 @@ async function processMarket(
     return;
   }
 
-  const fractalCandle =
-    candles[
-      signal.index
-    ];
+  // ==========================================================
+  // SAFETY
+  // ==========================================================
 
   if (
-    !fractalCandle
+    !Number.isFinite(
+      signal.timestamp
+    )
   ) {
     return;
   }
 
-  // ----------------------------------------------------------
-  // SIGNAL DATA
-  // ----------------------------------------------------------
+  // ==========================================================
+  // PREVENT DUPLICATE
+  // ==========================================================
+
+  if (
+    Number.isFinite(
+      previousTimestamp
+    ) &&
+    signal.timestamp <=
+      previousTimestamp
+  ) {
+    return;
+  }
+
+  // ==========================================================
+  // BUILD SIGNAL
+  // ==========================================================
 
   signal.symbol =
     normalizedSymbol;
@@ -2597,66 +2501,72 @@ async function processMarket(
   signal.timeframe =
     normalizedTimeframe;
 
-  signal.volume =
-    Number(
-      fractalCandle.volume ||
-      0
-    );
-
   signal.candleTimestamp =
-    fractalCandle.timestamp;
+    signal.timestamp;
 
   signal.candleStart =
-    fractalCandle.timestamp;
+    signal.timestamp;
 
   signal.candleEnd =
-    fractalCandle.timestamp +
+    signal.timestamp +
     TIMEFRAMES[
       normalizedTimeframe
     ] *
       60 *
       1000;
 
-  // ----------------------------------------------------------
-  // INDICATORS
-  // ----------------------------------------------------------
-  //
-  // These DO NOT filter the Rachel T signal.
-  //
-  // They are display information only.
-  //
-  // ----------------------------------------------------------
+  // ==========================================================
+  // DISPLAY DATA
+  // ==========================================================
 
-  const indicators =
-    buildIndicatorSnapshot(
+  const display =
+    buildDisplayData(
       candles,
       signal
     );
 
-  signal.rsi =
-    indicators.rsi;
+  // ==========================================================
+  // HTF STATE
+  // ==========================================================
 
-  signal.rsiState =
-    indicators.rsiState;
-
-  signal.candle =
-    indicators.candle;
-
-  signal.standardDeviation =
-    indicators.standardDeviation;
-
-  signal.marketStructure =
-    indicators.marketStructure;
-
-  // ----------------------------------------------------------
-  // STORE HTF CRT
-  // ----------------------------------------------------------
+  let shouldSend =
+    true;
 
   if (
     isTopDownTimeframe(
       normalizedTimeframe
     )
   ) {
+    const existingHTF =
+      getTopDownCRT(
+        normalizedSymbol,
+        normalizedTimeframe
+      );
+
+    // --------------------------------------------------------
+    // If PostgreSQL already restored the same/latest fractal,
+    // this is NOT a new CRT confirmation.
+    //
+    // Do not resend it after Railway restart.
+    // --------------------------------------------------------
+
+    if (
+      existingHTF &&
+      Number(
+        existingHTF.timestamp
+      ) >=
+        Number(
+          signal.timestamp
+        )
+    ) {
+      shouldSend =
+        false;
+    }
+
+    // --------------------------------------------------------
+    // Store/update latest HTF fractal.
+    // --------------------------------------------------------
+
     updateTopDownCRT(
       normalizedSymbol,
       normalizedTimeframe,
@@ -2664,61 +2574,9 @@ async function processMarket(
     );
   }
 
-  // ----------------------------------------------------------
-  // STARTUP BASELINE
-  // ----------------------------------------------------------
-  //
-  // Historical signal is stored.
-  //
-  // It is NOT sent immediately after Railway restart.
-  //
-  // ----------------------------------------------------------
-
-  if (
-    !startupBaseline.has(
-      stateKey
-    )
-  ) {
-    signalState.set(
-      stateKey,
-      signal.timestamp
-    );
-
-    startupBaseline.add(
-      stateKey
-    );
-
-    console.log(
-      `[CRT] Baseline | ${normalizedSymbol} | ${normalizedTimeframe} | ${signal.type} | ${signal.fractalType}`
-    );
-
-    return;
-  }
-
-  // ----------------------------------------------------------
-  // DUPLICATE PROTECTION
-  // ----------------------------------------------------------
-
-  const storedTimestamp =
-    signalState.get(
-      stateKey
-    ) || 0;
-
-  if (
-    signal.timestamp <=
-    storedTimestamp
-  ) {
-    return;
-  }
-
-  signalState.set(
-    stateKey,
-    signal.timestamp
-  );
-
-  // ----------------------------------------------------------
-  // 5M TOP-DOWN
-  // ----------------------------------------------------------
+  // ==========================================================
+  // 5M TOP-DOWN ANALYSIS
+  // ==========================================================
 
   let topDown =
     null;
@@ -2734,25 +2592,63 @@ async function processMarket(
       );
   }
 
-  // ----------------------------------------------------------
-  // SEND
-  // ----------------------------------------------------------
+  // ==========================================================
+  // SEND SIGNAL
+  // ==========================================================
+//
+// IMPORTANT:
+//
+// For a brand-new fractal:
+//   send = true
+//
+// For an already persisted HTF fractal:
+//   send = false
+//
+// For 5M:
+//   in-memory state controls duplicates.
+//
+// ==========================================================
 
-  await sendCRTSignal(
-    client,
-    {
-      symbol:
-        normalizedSymbol,
+  if (
+    shouldSend
+  ) {
+    const sent =
+      await sendCRTSignal(
+        client,
+        {
+          symbol:
+            normalizedSymbol,
 
-      timeframe:
-        normalizedTimeframe,
+          timeframe:
+            normalizedTimeframe,
 
-      signal,
+          signal,
 
-      indicators,
+          display,
 
-      topDown,
+          topDown,
+        }
+      );
+
+    if (
+      sent
+    ) {
+      signalState.set(
+        stateKey,
+        signal.timestamp
+      );
     }
+
+    return;
+  }
+
+  // ==========================================================
+  // MARK AS ALREADY PROCESSED
+  // ==========================================================
+
+  signalState.set(
+    stateKey,
+    signal.timestamp
   );
 }
 
@@ -2824,13 +2720,7 @@ async function runWithConcurrency(
 }
 
 // ============================================================
-// CLEANUP
-// ============================================================
-//
-// 30M is NOT scanned.
-//
-// This only removes old 30M legacy state.
-//
+// CLEAN OLD STATE
 // ============================================================
 
 function cleanupOldState() {
@@ -2848,9 +2738,16 @@ function cleanupOldState() {
   lastSignalCleanup =
     now;
 
+  // ----------------------------------------------------------
+  // 30M is deliberately removed.
+  //
+  // If an old 30M key somehow remains in memory,
+  // remove it.
+  // ----------------------------------------------------------
+
   for (
     const key of
-    signalState.keys()
+      signalState.keys()
   ) {
     if (
       key.includes(
@@ -2860,15 +2757,11 @@ function cleanupOldState() {
       signalState.delete(
         key
       );
-
-      startupBaseline.delete(
-        key
-      );
     }
   }
 
   console.log(
-    "[CRT] 30M legacy signal state cleanup completed."
+    "[CRT] Legacy 30M signal state cleanup completed."
   );
 }
 
@@ -2901,19 +2794,17 @@ async function scanMexc(
     return;
   }
 
-  // ----------------------------------------------------------
-  // HTF FIRST
-  // ----------------------------------------------------------
-  //
-  // 1D -> 4H -> 1H -> 15M -> 5M
-  //
-  // This ensures 5M can read newly stored HTF state.
-  //
-  // ----------------------------------------------------------
+  console.log(
+    `[CRT] Scanning ${symbols.length} MEXC Futures symbols.`
+  );
+
+  // ==========================================================
+  // TIMEFRAME ORDER
+  // ==========================================================
 
   for (
     const timeframe of
-    SCAN_ORDER
+      SCAN_ORDER
   ) {
     if (
       Date.now() <
@@ -2929,6 +2820,10 @@ async function scanMexc(
           timeframe,
         })
       );
+
+    console.log(
+      `[CRT] Scanning ${timeframe.toUpperCase()}`
+    );
 
     await runWithConcurrency(
       jobs,
@@ -2972,24 +2867,12 @@ async function scanMexc(
 async function runFullScan(
   client
 ) {
-  if (
-    scanRunning
-  ) {
-    console.warn(
-      "[CRT] Previous scan is still running. Skipping overlapping scan."
-    );
-
-    return;
-  }
-
-  scanRunning =
-    true;
-
-  const startedAt =
-    Date.now();
+  console.log(
+    "============================================================"
+  );
 
   console.log(
-    "[CRT] Starting MEXC CRT scan..."
+    "[CRT] Starting MEXC Futures CRT scan..."
   );
 
   try {
@@ -3003,25 +2886,22 @@ async function runFullScan(
       "[CRT] MEXC CRT scan failed:",
       error.message
     );
-  } finally {
-    const elapsed =
-      Date.now() -
-      startedAt;
-
-    console.log(
-      `[CRT] MEXC CRT scan completed in ${elapsed}ms.`
-    );
-
-    scanRunning =
-      false;
   }
+
+  console.log(
+    "[CRT] MEXC Futures CRT scan completed."
+  );
+
+  console.log(
+    "============================================================"
+  );
 }
 
 // ============================================================
 // START MONITOR
 // ============================================================
 
-export function startCRTMonitor(
+export async function startCRTMonitor(
   client
 ) {
   if (
@@ -3074,7 +2954,7 @@ export function startCRTMonitor(
   );
 
   console.log(
-    "[CRT] CRT SIGNAL MONITOR STARTED"
+    "[CRT] CRT SIGNAL MONITOR STARTING"
   );
 
   console.log(
@@ -3086,11 +2966,23 @@ export function startCRTMonitor(
   );
 
   console.log(
-    "[CRT] HTF: 1D -> 4H -> 1H -> 15M"
+    "[CRT] 1D: ENABLED"
   );
 
   console.log(
-    "[CRT] Lower timeframe: 5M"
+    "[CRT] 4H: ENABLED"
+  );
+
+  console.log(
+    "[CRT] 1H: ENABLED"
+  );
+
+  console.log(
+    "[CRT] 15M: ENABLED"
+  );
+
+  console.log(
+    "[CRT] 5M: ENABLED"
   );
 
   console.log(
@@ -3098,39 +2990,23 @@ export function startCRTMonitor(
   );
 
   console.log(
-    "[CRT] RSI: INFORMATION ONLY"
+    "[CRT] RSI: DISPLAY ONLY"
   );
 
   console.log(
-    "[CRT] Standard Deviation: INFORMATION ONLY"
+    "[CRT] STANDARD DEVIATION: DISPLAY ONLY"
   );
 
   console.log(
-    "[CRT] Market Structure: INFORMATION ONLY"
+    "[CRT] MARKET STRUCTURE: DISPLAY ONLY"
   );
 
   console.log(
-    "[CRT] Candle Direction: INFORMATION ONLY"
+    "[CRT] CLOSED CANDLE CONFIRMATION: ENABLED"
   );
 
   console.log(
-    "[CRT] Volume: INFORMATION ONLY"
-  );
-
-  console.log(
-    "[CRT] Persistent HTF state: ENABLED"
-  );
-
-  console.log(
-    `[CRT] RSI period: ${RSI_PERIOD}`
-  );
-
-  console.log(
-    `[CRT] RSI OB/OS: ${RSI_OVERBOUGHT}/${RSI_OVERSOLD}`
-  );
-
-  console.log(
-    `[CRT] STD DEV period: ${STD_DEV_PERIOD}`
+    "[CRT] PostgreSQL HTF persistence: ENABLED"
   );
 
   console.log(
@@ -3140,6 +3016,29 @@ export function startCRTMonitor(
   console.log(
     "============================================================"
   );
+
+  // ==========================================================
+  // LOAD PERSISTENT HTF STATE FIRST
+  // ==========================================================
+
+  try {
+    await loadTopDownPersistence();
+
+    console.log(
+      "[CRT] Persistent HTF state loaded."
+    );
+  } catch (
+    error
+  ) {
+    console.error(
+      "[CRT] Failed to load persistent HTF state:",
+      error.message
+    );
+  }
+
+  // ==========================================================
+  // FIRST SCAN
+  // ==========================================================
 
   runFullScan(
     client
@@ -3151,6 +3050,10 @@ export function startCRTMonitor(
       );
     }
   );
+
+  // ==========================================================
+  // REPEATING SCAN
+  // ==========================================================
 
   monitorTimer =
     setInterval(
@@ -3168,6 +3071,10 @@ export function startCRTMonitor(
       },
       CHECK_INTERVAL
     );
+
+  console.log(
+    "[CRT] CRT SIGNAL MONITOR STARTED."
+  );
 }
 
 // ============================================================
@@ -3189,114 +3096,17 @@ export function stopCRTMonitor() {
   crtMonitorStarted =
     false;
 
-  scanRunning =
-    false;
-
   console.log(
     "[CRT] Monitor stopped."
   );
 }
 
 // ============================================================
-// GET MONITOR STATUS
-// ============================================================
-
-export function getCRTMonitorStatus() {
-  return {
-    started:
-      crtMonitorStarted,
-
-    scanRunning,
-
-    checkInterval:
-      CHECK_INTERVAL,
-
-    candleLimit:
-      CANDLE_LIMIT,
-
-    concurrency:
-      CONCURRENCY,
-
-    blockedUntil:
-      mexcBlockedUntil,
-
-    symbolsCached:
-      Array.isArray(
-        mexcSymbolsCache
-      )
-        ? mexcSymbolsCache.length
-        : 0,
-
-    timeframes:
-      [
-        ...SCAN_ORDER,
-      ],
-
-    topDownTimeframes:
-      [
-        ...TOP_DOWN_TIMEFRAMES,
-      ],
-
-    lowerTimeframe:
-      LOWER_TIMEFRAME,
-
-    rachelTFractal:
-      true,
-
-    thirtyMinute:
-      false,
-
-    rsi:
-      true,
-
-    rsiPeriod:
-      RSI_PERIOD,
-
-    rsiOverbought:
-      RSI_OVERBOUGHT,
-
-    rsiOversold:
-      RSI_OVERSOLD,
-
-    standardDeviation:
-      true,
-
-    standardDeviationPeriod:
-      STD_DEV_PERIOD,
-
-    marketStructure:
-      true,
-
-    candleDirection:
-      true,
-
-    volume:
-      true,
-
-    persistentHTFState:
-      true,
-
-    databasePersistence:
-      "topDown.js",
-  };
-}
-
-// ============================================================
-// GET CURRENT TOP-DOWN STATE
-// ============================================================
-
-export function getCRTTopDownState(
-  symbol
-) {
-  return getStoredTopDownState(
-    normalizeSymbol(
-      symbol
-    )
-  );
-}
-
-// ============================================================
 // TEST MARKET ANALYSIS
+// ============================================================
+//
+// Compatibility function.
+//
 // ============================================================
 
 export function testMarketAnalysis(
@@ -3307,7 +3117,7 @@ export function testMarketAnalysis(
       candles
     ) ||
     candles.length <
-      20
+      5
   ) {
     return null;
   }
@@ -3317,60 +3127,54 @@ export function testMarketAnalysis(
       candles
     );
 
-  const indicators =
-    buildIndicatorSnapshot(
+  const rsi =
+    calculateRSI(
       candles,
-      fractal
+      Number(
+        CRT_CONFIG.rsi?.period
+      ) || 14
+    );
+
+  const standardDeviation =
+    calculateStandardDeviation(
+      candles,
+      20
     );
 
   return {
     fractal,
 
-    rsi:
-      indicators.rsi,
+    rsi,
 
     rsiState:
-      indicators.rsiState,
+      getRSIState(
+        rsi
+      ),
 
-    volume:
-      indicators.volume,
-
-    candle:
-      indicators.candle,
-
-    standardDeviation:
-      indicators.standardDeviation,
+    standardDeviation,
 
     marketStructure:
-      indicators.marketStructure,
+      getMarketStructure(
+        candles
+      ),
   };
 }
-
-// ============================================================
-// LEGACY RSI EXPORT
-// ============================================================
-//
-// Kept for compatibility with existing commands/imports.
-//
-// ============================================================
-
-// calculateRSI is already exported above.
-
-// ============================================================
-// LEGACY STANDARD DEVIATION EXPORT
-// ============================================================
-//
-// calculateStandardDeviation is already exported above.
-//
-// ============================================================
 
 // ============================================================
 // SERVICE INFO
 // ============================================================
 
 export function getCRTServiceInfo() {
-  const mexc =
-    getMexcServiceInfo();
+  let mexc =
+    null;
+
+  try {
+    mexc =
+      getMexcServiceInfo();
+  } catch {
+    mexc =
+      null;
+  }
 
   return {
     cryptoProvider:
@@ -3383,7 +3187,8 @@ export function getCRTServiceInfo() {
       false,
 
     mexcApi:
-      mexc.futuresBaseUrl,
+      mexc?.futuresBaseUrl ||
+      null,
 
     spot:
       false,
@@ -3410,31 +3215,13 @@ export function getCRTServiceInfo() {
       true,
 
     rsi:
-      true,
-
-    rsiPeriod:
-      RSI_PERIOD,
-
-    rsiOverbought:
-      RSI_OVERBOUGHT,
-
-    rsiOversold:
-      RSI_OVERSOLD,
+      "DISPLAY ONLY",
 
     standardDeviation:
-      true,
-
-    standardDeviationPeriod:
-      STD_DEV_PERIOD,
+      "DISPLAY ONLY",
 
     marketStructure:
-      true,
-
-    candleDirection:
-      true,
-
-    volume:
-      true,
+      "DISPLAY ONLY",
 
     persistentPreviousCRT:
       true,
@@ -3444,6 +3231,9 @@ export function getCRTServiceInfo() {
 
     topDownCandleSynchronization:
       false,
+
+    closedCandleConfirmation:
+      true,
 
     timezone:
       CRT_TIMEZONE,
@@ -3456,6 +3246,11 @@ export function getCRTServiceInfo() {
 
     concurrency:
       CONCURRENCY,
+
+    channels:
+      {
+        ...CHANNELS,
+      },
   };
 }
 
@@ -3488,29 +3283,25 @@ console.log(
 );
 
 console.log(
-  "[CRT] RSI information enabled."
+  "[CRT] RSI display enabled."
 );
 
 console.log(
-  "[CRT] Standard Deviation information enabled."
+  "[CRT] Standard Deviation display enabled."
 );
 
 console.log(
-  "[CRT] Market Structure information enabled."
+  "[CRT] Market Structure display enabled."
 );
 
 console.log(
-  "[CRT] Candle direction information enabled."
+  "[CRT] Closed-candle Rachel T confirmation enabled."
 );
 
 console.log(
-  "[CRT] Volume information enabled."
+  "[CRT] PostgreSQL HTF persistence enabled through topDown.js."
 );
 
 console.log(
-  "[CRT] Persistent previous HTF CRT enabled."
-);
-
-console.log(
-  "[CRT] PostgreSQL persistence delegated to topDown.js."
+  "[CRT] Designated Discord channels enabled."
 );
