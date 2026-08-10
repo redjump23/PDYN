@@ -14,7 +14,6 @@ const CRT_CONFIG = botConfig.crt || {};
 const TIMEFRAMES = CRT_CONFIG.timeframes || {
   '5m': 5,
   '15m': 15,
-  '30m': 30,
   '1h': 60,
   '4h': 240,
   '1d': 1440,
@@ -84,7 +83,6 @@ function timeframeLabel(tf) {
     {
       '5m': '5 MINUTES',
       '15m': '15 MINUTES',
-      '30m': '30 MINUTES',
       '1h': '1 HOUR',
       '4h': '4 HOURS',
       '1d': 'DAILY',
