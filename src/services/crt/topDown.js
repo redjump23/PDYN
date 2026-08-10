@@ -1,9 +1,9 @@
+```javascript
 // ============================================================
 // PDYN CRT TOP-DOWN SERVICE
 // ============================================================
 //
-// PURPOSE
-// ============================================================
+// PURPOSE:
 //
 // Rachel T Fractal ONLY.
 //
@@ -18,20 +18,22 @@
 //
 //   5M
 //
-// PostgreSQL persistence:
+// BEHAVIOR:
 //
-//   • Previous confirmed HTF fractals survive Railway restart.
-//   • Memory cache is used for fast reads.
-//   • Database is loaded asynchronously at startup.
-//   • Newer fractals replace older fractals.
-//   • Older/equal fractals are ignored.
-//   • Temporary database failures do NOT clear memory.
-//   • No TTL is applied to HTF CRT state.
+//   • Store the latest confirmed Rachel T fractal.
+//   • Store separately for every symbol.
+//   • Store separately for every timeframe.
+//   • Save confirmed HTF fractals to PostgreSQL.
+//   • Load previous HTF fractals from PostgreSQL on startup.
+//   • If no NEW fractal is found, keep the previous one.
+//   • If the API/data has a temporary problem, keep the
+//     previous stored fractal.
+//   • A newer confirmed fractal replaces the old one.
+//   • 5M reads the latest stored HTF fractals.
 //
-// ============================================================
+// IMPORTANT:
 //
-// DOES NOT USE
-// ============================================================
+// This module does NOT use:
 //
 //   RSI
 //   Standard Deviation
@@ -40,9 +42,13 @@
 //   Same-candle HTF confirmation
 //   30M
 //
+// Rachel T fractal confirmation is the ONLY CRT confirmation
+// used by the top-down system.
+//
 // ============================================================
 
-import pgDb from "../../utils/postgresDatabase.js";
+import { pgDb } from "../../utils/postgresDatabase.js";
+
 
 // ============================================================
 // TIMEFRAMES
@@ -55,14 +61,16 @@ const TOP_DOWN_TIMEFRAMES = [
   "15m",
 ];
 
+
 // ============================================================
 // LOWER TIMEFRAME
 // ============================================================
 
 const LOWER_TIMEFRAME = "5m";
 
+
 // ============================================================
-// ALL SUPPORTED TIMEFRAMES
+// ALL TIMEFRAMES
 // ============================================================
 
 const ALL_TIMEFRAMES = [
@@ -70,55 +78,58 @@ const ALL_TIMEFRAMES = [
   LOWER_TIMEFRAME,
 ];
 
-// ============================================================
-// DATABASE KEY PREFIX
-// ============================================================
-//
-// One database key per symbol:
-//
-// temp:pdyn:topdown:BTC_USDT
-//
-// Stored value:
-//
-// {
-//   "1d": {...},
-//   "4h": {...},
-//   "1h": {...},
-//   "15m": {...}
-// }
-//
-// ============================================================
-
-const DATABASE_KEY_PREFIX =
-  "pdyn:topdown:";
 
 // ============================================================
 // IN-MEMORY STATE
 // ============================================================
 //
+// Structure:
+//
 // Map<symbol, Map<timeframe, CRT>>
+//
+// Example:
+//
+// BTC_USDT
+//   1d  -> BUY
+//   4h  -> BUY
+//   1h  -> SELL
+//   15m -> BUY
+//
+// PostgreSQL is the permanent backup.
+// Memory is used for fast access during runtime.
 //
 // ============================================================
 
 const topDownState = new Map();
 
+
+// ============================================================
+// DATABASE PREFIX
+// ============================================================
+//
+// Each CRT state is stored separately:
+//
+// temp:crt_topdown:BTC_USDT:1d
+// temp:crt_topdown:BTC_USDT:4h
+// temp:crt_topdown:BTC_USDT:1h
+// temp:crt_topdown:BTC_USDT:15m
+//
+// No TTL is used.
+//
+// Therefore the records survive Railway restarts.
+//
+// ============================================================
+
+const TOPDOWN_DB_PREFIX =
+  "temp:crt_topdown";
+
+
 // ============================================================
 // DATABASE LOAD STATE
 // ============================================================
 
-let databaseLoadStarted = false;
+let topDownPersistenceLoaded = false;
 
-let databaseLoadCompleted = false;
-
-// ============================================================
-// DATABASE WRITE QUEUE
-// ============================================================
-//
-// Prevent multiple writes for the same symbol from racing.
-//
-// ============================================================
-
-const databaseWriteQueue = new Map();
 
 // ============================================================
 // NORMALIZE SYMBOL
@@ -130,6 +141,7 @@ function normalizeSymbol(symbol) {
     .toUpperCase();
 }
 
+
 // ============================================================
 // NORMALIZE TIMEFRAME
 // ============================================================
@@ -140,47 +152,44 @@ function normalizeTimeframe(timeframe) {
     .toLowerCase();
 }
 
+
 // ============================================================
-// DATABASE KEY
+// BUILD DATABASE KEY
 // ============================================================
 
-function getDatabaseKey(symbol) {
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
-
-  if (!normalizedSymbol) {
-    return null;
-  }
-
+function getTopDownDatabaseKey(
+  symbol,
+  timeframe
+) {
   return (
-    DATABASE_KEY_PREFIX +
-    normalizedSymbol
+    `${TOPDOWN_DB_PREFIX}:` +
+    `${normalizeSymbol(symbol)}:` +
+    `${normalizeTimeframe(timeframe)}`
   );
 }
 
+
 // ============================================================
-// CHECK TOP-DOWN TIMEFRAME
+// CHECK HTF
 // ============================================================
 
-export function isTopDownTimeframe(
-  timeframe
-) {
+export function isTopDownTimeframe(timeframe) {
   return TOP_DOWN_TIMEFRAMES.includes(
     normalizeTimeframe(timeframe)
   );
 }
 
+
 // ============================================================
 // CHECK SUPPORTED TIMEFRAME
 // ============================================================
 
-function isSupportedTimeframe(
-  timeframe
-) {
+function isSupportedTimeframe(timeframe) {
   return ALL_TIMEFRAMES.includes(
     normalizeTimeframe(timeframe)
   );
 }
+
 
 // ============================================================
 // GET SYMBOL STATE
@@ -206,21 +215,22 @@ function getSymbolState(symbol) {
   );
 }
 
-// ============================================================
-// CREATE EMPTY TOP-DOWN STATE
-// ============================================================
-
-export function createEmptyTopDownState() {
-  return {
-    "1d": null,
-    "4h": null,
-    "1h": null,
-    "15m": null,
-  };
-}
 
 // ============================================================
 // NORMALIZE SIGNAL
+// ============================================================
+//
+// Accepts the signal object produced by crtService.js.
+//
+// Preserves:
+//
+//   type
+//   fractalType
+//   timestamp
+//   price
+//   fractalPrice
+//   volume
+//
 // ============================================================
 
 function normalizeSignal(
@@ -250,7 +260,9 @@ function normalizeSignal(
   const timestamp =
     Number(signal.timestamp);
 
-  if (!Number.isFinite(timestamp)) {
+  if (
+    !Number.isFinite(timestamp)
+  ) {
     return null;
   }
 
@@ -269,11 +281,11 @@ function normalizeSignal(
   const fractalType =
     String(
       signal.fractalType ||
-        (
-          type === "BUY"
-            ? "BOTTOM"
-            : "TOP"
-        )
+      (
+        type === "BUY"
+          ? "BOTTOM"
+          : "TOP"
+      )
     )
       .trim()
       .toUpperCase();
@@ -286,15 +298,6 @@ function normalizeSignal(
 
   const volume =
     Number(signal.volume);
-
-  const candleTimestamp =
-    Number(signal.candleTimestamp);
-
-  const candleStart =
-    Number(signal.candleStart);
-
-  const candleEnd =
-    Number(signal.candleEnd);
 
   return {
     symbol:
@@ -324,518 +327,276 @@ function normalizeSignal(
         ? volume
         : 0,
 
-    candleTimestamp:
-      Number.isFinite(
-        candleTimestamp
-      )
-        ? candleTimestamp
-        : timestamp,
-
-    candleStart:
-      Number.isFinite(
-        candleStart
-      )
-        ? candleStart
-        : timestamp,
-
-    candleEnd:
-      Number.isFinite(
-        candleEnd
-      )
-        ? candleEnd
-        : null,
-
     storedAt:
-      Number.isFinite(
-        Number(signal.storedAt)
-      )
-        ? Number(signal.storedAt)
-        : Date.now(),
+      Date.now(),
   };
 }
 
-// ============================================================
-// SERIALIZE SIGNAL
-// ============================================================
-
-function serializeSignal(signal) {
-  if (!signal) {
-    return null;
-  }
-
-  return {
-    symbol:
-      signal.symbol,
-
-    timeframe:
-      signal.timeframe,
-
-    type:
-      signal.type,
-
-    fractalType:
-      signal.fractalType,
-
-    timestamp:
-      signal.timestamp,
-
-    price:
-      signal.price,
-
-    fractalPrice:
-      signal.fractalPrice,
-
-    volume:
-      signal.volume,
-
-    candleTimestamp:
-      signal.candleTimestamp,
-
-    candleStart:
-      signal.candleStart,
-
-    candleEnd:
-      signal.candleEnd,
-
-    storedAt:
-      signal.storedAt,
-  };
-}
 
 // ============================================================
-// SAVE SYMBOL STATE TO POSTGRESQL
+// SAVE CRT TO POSTGRESQL
 // ============================================================
 //
-// IMPORTANT:
+// Saves one confirmed HTF CRT.
 //
-// This function is asynchronous, but updateTopDownCRT()
-// remains synchronous so existing crtService.js does not
-// need to use await.
+// No TTL is supplied.
+//
+// Therefore this record remains in PostgreSQL until explicitly
+// replaced or deleted.
 //
 // ============================================================
 
-async function persistSymbolState(
-  symbol
+async function saveTopDownCRTToDatabase(
+  signal
 ) {
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
-
-  if (!normalizedSymbol) {
-    return false;
-  }
-
-  const key =
-    getDatabaseKey(
-      normalizedSymbol
-    );
-
-  if (!key) {
-    return false;
-  }
-
-  const symbolState =
-    topDownState.get(
-      normalizedSymbol
-    );
-
-  if (!symbolState) {
-    return false;
-  }
-
-  const payload =
-    createEmptyTopDownState();
-
-  for (
-    const timeframe of
-      TOP_DOWN_TIMEFRAMES
-  ) {
-    const signal =
-      symbolState.get(
-        timeframe
-      );
-
-    if (signal) {
-      payload[timeframe] =
-        serializeSignal(
-          signal
-        );
-    }
-  }
-
   try {
-    if (
-      !pgDb ||
-      typeof pgDb.set !==
-        "function"
-    ) {
-      console.error(
-        "[TOPDOWN] PostgreSQL pgDb.set() is unavailable."
+    if (!pgDb.isAvailable()) {
+      console.warn(
+        "[TOPDOWN] PostgreSQL unavailable. " +
+        "CRT remains in memory only."
       );
 
       return false;
     }
 
-    await pgDb.set(
-      key,
-      payload
-    );
+    if (!signal) {
+      return false;
+    }
 
-    return true;
+    if (
+      !isTopDownTimeframe(
+        signal.timeframe
+      )
+    ) {
+      return false;
+    }
+
+    const key =
+      getTopDownDatabaseKey(
+        signal.symbol,
+        signal.timeframe
+      );
+
+    const saved =
+      await pgDb.set(
+        key,
+        signal
+      );
+
+    if (saved) {
+      console.log(
+        `[TOPDOWN] PostgreSQL saved ` +
+        `${signal.symbol} ` +
+        `${signal.timeframe.toUpperCase()} ` +
+        `${signal.type} fractal`
+      );
+    }
+
+    return saved;
   } catch (error) {
     console.error(
-      `[TOPDOWN] PostgreSQL save failed for ${normalizedSymbol}:`,
-      error?.message ||
-        error
+      "[TOPDOWN] PostgreSQL save failed:",
+      error.message
     );
 
     return false;
   }
 }
 
+
 // ============================================================
-// QUEUE DATABASE WRITE
+// LOAD ALL CRT STATE FROM POSTGRESQL
 // ============================================================
 //
-// Prevent overlapping writes for the same symbol.
+// This function is called during CRT startup.
+//
+// It restores the latest stored HTF fractals BEFORE normal
+// CRT scanning begins.
 //
 // ============================================================
 
-function queueDatabaseWrite(
-  symbol
-) {
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
-
-  if (!normalizedSymbol) {
-    return;
+export async function loadTopDownPersistence() {
+  if (topDownPersistenceLoaded) {
+    return true;
   }
 
-  const previousPromise =
-    databaseWriteQueue.get(
-      normalizedSymbol
-    ) || Promise.resolve();
+  try {
+    if (!pgDb.isAvailable()) {
+      console.warn(
+        "[TOPDOWN] PostgreSQL unavailable during startup."
+      );
 
-  const nextPromise =
-    previousPromise
-      .catch(
-        () => {}
-      )
-      .then(
-        () =>
-          persistSymbolState(
-            normalizedSymbol
+      console.warn(
+        "[TOPDOWN] Starting with memory-only CRT state."
+      );
+
+      return false;
+    }
+
+    console.log(
+      "[TOPDOWN] Loading persistent CRT state from PostgreSQL..."
+    );
+
+    const keys =
+      await pgDb.list(
+        TOPDOWN_DB_PREFIX
+      );
+
+    let loaded = 0;
+
+    for (const key of keys) {
+      try {
+        if (
+          !key.startsWith(
+            `${TOPDOWN_DB_PREFIX}:`
           )
-      )
-      .catch(
-        error => {
-          console.error(
-            `[TOPDOWN] Database queue error ${normalizedSymbol}:`,
-            error?.message ||
-              error
+        ) {
+          continue;
+        }
+
+        const prefix =
+          `${TOPDOWN_DB_PREFIX}:`;
+
+        const remainder =
+          key.slice(
+            prefix.length
+          );
+
+        const separatorIndex =
+          remainder.lastIndexOf(":");
+
+        if (
+          separatorIndex <= 0 ||
+          separatorIndex >=
+            remainder.length - 1
+        ) {
+          continue;
+        }
+
+        const symbol =
+          normalizeSymbol(
+            remainder.slice(
+              0,
+              separatorIndex
+            )
+          );
+
+        const timeframe =
+          normalizeTimeframe(
+            remainder.slice(
+              separatorIndex + 1
+            )
+          );
+
+        if (
+          !symbol ||
+          !isTopDownTimeframe(
+            timeframe
+          )
+        ) {
+          continue;
+        }
+
+        const signal =
+          await pgDb.get(
+            key,
+            null
+          );
+
+        if (!signal) {
+          continue;
+        }
+
+        const normalizedSignal =
+          normalizeSignal(
+            symbol,
+            timeframe,
+            signal
+          );
+
+        if (!normalizedSignal) {
+          console.warn(
+            `[TOPDOWN] Invalid database CRT ignored: ` +
+            `${symbol} ${timeframe}`
+          );
+
+          continue;
+        }
+
+        const symbolState =
+          getSymbolState(
+            symbol
+          );
+
+        if (!symbolState) {
+          continue;
+        }
+
+        const previous =
+          symbolState.get(
+            timeframe
+          );
+
+        if (
+          !previous ||
+          normalizedSignal.timestamp >
+            previous.timestamp
+        ) {
+          symbolState.set(
+            timeframe,
+            normalizedSignal
+          );
+
+          loaded++;
+
+          console.log(
+            `[TOPDOWN] Restored ${symbol} ` +
+            `${timeframe.toUpperCase()} ` +
+            `${normalizedSignal.type} fractal ` +
+            `from PostgreSQL`
           );
         }
-      );
-
-  databaseWriteQueue.set(
-    normalizedSymbol,
-    nextPromise
-  );
-
-  nextPromise.finally(
-    () => {
-      if (
-        databaseWriteQueue.get(
-          normalizedSymbol
-        ) === nextPromise
-      ) {
-        databaseWriteQueue.delete(
-          normalizedSymbol
+      } catch (error) {
+        console.error(
+          `[TOPDOWN] Failed to restore database key ${key}:`,
+          error.message
         );
       }
     }
-  );
-}
 
-// ============================================================
-// LOAD ONE SYMBOL FROM POSTGRESQL
-// ============================================================
-
-async function loadSymbolFromDatabase(
-  symbol
-) {
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
-
-  if (!normalizedSymbol) {
-    return false;
-  }
-
-  const key =
-    getDatabaseKey(
-      normalizedSymbol
-    );
-
-  if (!key) {
-    return false;
-  }
-
-  try {
-    if (
-      !pgDb ||
-      typeof pgDb.get !==
-        "function"
-    ) {
-      console.error(
-        "[TOPDOWN] PostgreSQL pgDb.get() is unavailable."
-      );
-
-      return false;
-    }
-
-    const stored =
-      await pgDb.get(
-        key
-      );
-
-    if (
-      !stored ||
-      typeof stored !==
-        "object"
-    ) {
-      return false;
-    }
-
-    const symbolState =
-      getSymbolState(
-        normalizedSymbol
-      );
-
-    if (!symbolState) {
-      return false;
-    }
-
-    let loadedCount = 0;
-
-    for (
-      const timeframe of
-        TOP_DOWN_TIMEFRAMES
-    ) {
-      const storedSignal =
-        stored[
-          timeframe
-        ];
-
-      if (!storedSignal) {
-        continue;
-      }
-
-      const normalizedSignal =
-        normalizeSignal(
-          normalizedSymbol,
-          timeframe,
-          storedSignal
-        );
-
-      if (!normalizedSignal) {
-        continue;
-      }
-
-      const previous =
-        symbolState.get(
-          timeframe
-        );
-
-      if (
-        !previous ||
-        normalizedSignal.timestamp >
-          previous.timestamp
-      ) {
-        symbolState.set(
-          timeframe,
-          normalizedSignal
-        );
-
-        loadedCount++;
-      }
-    }
-
-    if (loadedCount > 0) {
-      console.log(
-        `[TOPDOWN] PostgreSQL restored ${normalizedSymbol}: ${loadedCount} HTF CRT(s)`
-      );
-
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    console.error(
-      `[TOPDOWN] PostgreSQL load failed for ${normalizedSymbol}:`,
-      error?.message ||
-        error
-    );
-
-    return false;
-  }
-}
-
-// ============================================================
-// LOAD ALL TOP-DOWN STATE
-// ============================================================
-//
-// The existing database layer may not expose a convenient
-// "get all top-down keys" method.
-//
-// Therefore:
-//
-// 1. Existing in-memory state is always safe.
-// 2. Known symbols can be restored when requested.
-// 3. New signals are persisted immediately.
-//
-// ============================================================
-
-export async function loadTopDownState(
-  symbols = []
-) {
-  if (
-    databaseLoadStarted &&
-    databaseLoadCompleted
-  ) {
-    return true;
-  }
-
-  databaseLoadStarted =
-    true;
-
-  const normalizedSymbols = [
-    ...new Set(
-      (
-        Array.isArray(symbols)
-          ? symbols
-          : []
-      )
-        .map(
-          normalizeSymbol
-        )
-        .filter(Boolean)
-    ),
-  ];
-
-  try {
-    for (
-      const symbol of
-        normalizedSymbols
-    ) {
-      await loadSymbolFromDatabase(
-        symbol
-      );
-    }
-
-    databaseLoadCompleted =
+    topDownPersistenceLoaded =
       true;
 
     console.log(
-      `[TOPDOWN] PostgreSQL state load completed | symbols: ${normalizedSymbols.length}`
+      `[TOPDOWN] PostgreSQL state loaded: ` +
+      `${loaded} CRT records`
     );
 
     return true;
   } catch (error) {
     console.error(
-      "[TOPDOWN] PostgreSQL startup load failed:",
-      error?.message ||
-        error
+      "[TOPDOWN] PostgreSQL load failed:",
+      error.message
     );
-
-    databaseLoadCompleted =
-      false;
 
     return false;
   }
 }
 
-// ============================================================
-// ENSURE SYMBOL DATABASE STATE
-// ============================================================
-//
-// Called when a symbol is first encountered.
-//
-// It loads the persisted state once, but does not block the
-// synchronous CRT update API.
-//
-// ============================================================
-
-function ensureSymbolDatabaseLoad(
-  symbol
-) {
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
-
-  if (!normalizedSymbol) {
-    return;
-  }
-
-  const symbolState =
-    getSymbolState(
-      normalizedSymbol
-    );
-
-  if (!symbolState) {
-    return;
-  }
-
-  // ----------------------------------------------------------
-  // Marker stored directly on the Map object.
-  // ----------------------------------------------------------
-
-  if (
-    symbolState.__databaseLoaded
-  ) {
-    return;
-  }
-
-  Object.defineProperty(
-    symbolState,
-    "__databaseLoaded",
-    {
-      value:
-        true,
-      writable:
-        true,
-      configurable:
-        true,
-      enumerable:
-        false,
-    }
-  );
-
-  loadSymbolFromDatabase(
-    normalizedSymbol
-  ).catch(
-    error => {
-      console.error(
-        `[TOPDOWN] Background database restore failed ${normalizedSymbol}:`,
-        error?.message ||
-          error
-      );
-    }
-  );
-}
 
 // ============================================================
-// STORE / UPDATE CRT
+// STORE CRT
 // ============================================================
 //
-// IMPORTANT:
+// ONLY replace the stored CRT when the incoming fractal
+// is newer.
 //
-// This function remains synchronous.
+// Older/equal fractals are ignored.
 //
-// crtService.js currently calls:
+// Every accepted new fractal is:
 //
-//   updateTopDownCRT(...)
-//
-// without await.
-//
-// Therefore database persistence happens asynchronously.
+//   1. Stored in memory.
+//   2. Saved to PostgreSQL.
 //
 // ============================================================
 
@@ -884,6 +645,7 @@ export function updateTopDownCRT(
       normalizedTimeframe
     );
 
+
   // ----------------------------------------------------------
   // FIRST CONFIRMED FRACTAL
   // ----------------------------------------------------------
@@ -895,15 +657,18 @@ export function updateTopDownCRT(
     );
 
     console.log(
-      `[TOPDOWN] Stored ${normalizedSymbol} ${normalizedTimeframe.toUpperCase()} ${normalizedSignal.type} fractal`
+      `[TOPDOWN] Stored ${normalizedSymbol} ` +
+      `${normalizedTimeframe.toUpperCase()} ` +
+      `${normalizedSignal.type} fractal`
     );
 
-    queueDatabaseWrite(
-      normalizedSymbol
+    void saveTopDownCRTToDatabase(
+      normalizedSignal
     );
 
     return true;
   }
+
 
   // ----------------------------------------------------------
   // OLD OR SAME FRACTAL
@@ -916,6 +681,7 @@ export function updateTopDownCRT(
     return false;
   }
 
+
   // ----------------------------------------------------------
   // NEWER FRACTAL
   // ----------------------------------------------------------
@@ -926,15 +692,18 @@ export function updateTopDownCRT(
   );
 
   console.log(
-    `[TOPDOWN] Updated ${normalizedSymbol} ${normalizedTimeframe.toUpperCase()} ${normalizedSignal.type} fractal`
+    `[TOPDOWN] Updated ${normalizedSymbol} ` +
+    `${normalizedTimeframe.toUpperCase()} ` +
+    `${normalizedSignal.type} fractal`
   );
 
-  queueDatabaseWrite(
-    normalizedSymbol
+  void saveTopDownCRTToDatabase(
+    normalizedSignal
   );
 
   return true;
 }
+
 
 // ============================================================
 // GET STORED CRT
@@ -959,10 +728,6 @@ export function getTopDownCRT(
     return null;
   }
 
-  ensureSymbolDatabaseLoad(
-    normalizedSymbol
-  );
-
   const symbolState =
     topDownState.get(
       normalizedSymbol
@@ -980,6 +745,7 @@ export function getTopDownCRT(
   );
 }
 
+
 // ============================================================
 // GET ALL STORED HTF CRT
 // ============================================================
@@ -993,10 +759,6 @@ export function getStoredTopDownState(
   if (!normalizedSymbol) {
     return createEmptyTopDownState();
   }
-
-  ensureSymbolDatabaseLoad(
-    normalizedSymbol
-  );
 
   const result =
     createEmptyTopDownState();
@@ -1012,7 +774,7 @@ export function getStoredTopDownState(
 
   for (
     const timeframe of
-      TOP_DOWN_TIMEFRAMES
+    TOP_DOWN_TIMEFRAMES
   ) {
     const signal =
       symbolState.get(
@@ -1029,6 +791,21 @@ export function getStoredTopDownState(
   return result;
 }
 
+
+// ============================================================
+// CREATE EMPTY STATE
+// ============================================================
+
+export function createEmptyTopDownState() {
+  return {
+    "1d": null,
+    "4h": null,
+    "1h": null,
+    "15m": null,
+  };
+}
+
+
 // ============================================================
 // GET TOP-DOWN TIMEFRAMES
 // ============================================================
@@ -1038,6 +815,7 @@ export function getTopDownTimeframes() {
     ...TOP_DOWN_TIMEFRAMES,
   ];
 }
+
 
 // ============================================================
 // COUNT CONFIRMED HTF CRT
@@ -1054,7 +832,7 @@ export function countTopDownConfirmed(
 
   for (
     const timeframe of
-      TOP_DOWN_TIMEFRAMES
+    TOP_DOWN_TIMEFRAMES
   ) {
     if (
       topDown[timeframe]
@@ -1065,6 +843,7 @@ export function countTopDownConfirmed(
 
   return count;
 }
+
 
 // ============================================================
 // FORMAT TOP-DOWN COUNT
@@ -1080,6 +859,7 @@ export function formatTopDownCount(
 
   return `${count}/4 CONFIRMED`;
 }
+
 
 // ============================================================
 // FORMAT SINGLE CRT
@@ -1097,8 +877,15 @@ function formatSingleCRT(
     : "SELL";
 }
 
+
 // ============================================================
 // FORMAT HTF CRT
+// ============================================================
+//
+// Example:
+//
+// 1D BUY • 4H BUY • 1H SELL • 15M BUY
+//
 // ============================================================
 
 export function formatHTFCRT(
@@ -1134,11 +921,14 @@ export function formatHTFCRT(
   );
 }
 
+
 // ============================================================
 // FORMAT HTF CRT DETAILS
 // ============================================================
 //
-// Alias required by crtService.js.
+// Kept as an alias because crtService.js imports:
+//
+//   formatHTFCRTDetails
 //
 // ============================================================
 
@@ -1149,6 +939,7 @@ export function formatHTFCRTDetails(
     topDown
   );
 }
+
 
 // ============================================================
 // BUILD TOP-DOWN CHAIN
@@ -1206,11 +997,14 @@ export function buildTopDownChain(
   };
 }
 
+
 // ============================================================
 // ANALYZE TOP-DOWN
 // ============================================================
 //
 // Called when a 5M Rachel T fractal is detected.
+//
+// HTF confirmation comes ONLY from stored Rachel T fractals.
 //
 // ============================================================
 
@@ -1281,6 +1075,7 @@ export function analyzeTopDown(
   };
 }
 
+
 // ============================================================
 // FORMAT TOP-DOWN DISPLAY
 // ============================================================
@@ -1301,8 +1096,8 @@ export function formatTopDownDisplay(
   const confirmed =
     Number(
       topDown.confirmedCount ??
-        topDown.confirmed ??
-        0
+      topDown.confirmed ??
+      0
     );
 
   const daily =
@@ -1339,6 +1134,7 @@ export function formatTopDownDisplay(
     "\n"
   );
 }
+
 
 // ============================================================
 // GET TOP-DOWN SUMMARY
@@ -1385,13 +1181,15 @@ export function getTopDownSummary(
   };
 }
 
+
 // ============================================================
 // CLEAR ONE SYMBOL
 // ============================================================
 //
 // Deliberate operation only.
+// Normal scanning NEVER clears HTF state.
 //
-// Also removes the PostgreSQL record.
+// Also removes the symbol's persistent database records.
 //
 // ============================================================
 
@@ -1410,37 +1208,32 @@ export function clearTopDownSymbol(
       normalizedSymbol
     );
 
-  const key =
-    getDatabaseKey(
-      normalizedSymbol
-    );
-
-  if (
-    key &&
-    pgDb &&
-    typeof pgDb.delete ===
-      "function"
+  // Delete persistent records asynchronously.
+  for (
+    const timeframe of
+    TOP_DOWN_TIMEFRAMES
   ) {
-    Promise.resolve(
-      pgDb.delete(
-        key
-      )
-    ).catch(
-      error => {
-        console.error(
-          `[TOPDOWN] PostgreSQL delete failed ${normalizedSymbol}:`,
-          error?.message ||
-            error
-        );
-      }
+    const key =
+      getTopDownDatabaseKey(
+        normalizedSymbol,
+        timeframe
+      );
+
+    void pgDb.delete(
+      key
     );
   }
 
   return deleted;
 }
 
+
 // ============================================================
 // CLEAR ONE TIMEFRAME
+// ============================================================
+//
+// Deliberate operation only.
+//
 // ============================================================
 
 export function clearTopDownTimeframe(
@@ -1468,6 +1261,13 @@ export function clearTopDownTimeframe(
     );
 
   if (!symbolState) {
+    void pgDb.delete(
+      getTopDownDatabaseKey(
+        normalizedSymbol,
+        normalizedTimeframe
+      )
+    );
+
     return false;
   }
 
@@ -1476,14 +1276,11 @@ export function clearTopDownTimeframe(
       normalizedTimeframe
     );
 
-  if (
-    !deleted
-  ) {
-    return false;
-  }
-
-  queueDatabaseWrite(
-    normalizedSymbol
+  void pgDb.delete(
+    getTopDownDatabaseKey(
+      normalizedSymbol,
+      normalizedTimeframe
+    )
   );
 
   if (
@@ -1494,8 +1291,9 @@ export function clearTopDownTimeframe(
     );
   }
 
-  return true;
+  return deleted;
 }
+
 
 // ============================================================
 // CLEAR EVERYTHING
@@ -1503,55 +1301,53 @@ export function clearTopDownTimeframe(
 //
 // Deliberate operation only.
 //
-// WARNING:
+// DO NOT call during normal scans.
 //
-// This clears memory state.
-//
-// Database records are also removed when the database layer
-// supports delete().
+// This removes both memory state and persistent database state.
 //
 // ============================================================
 
 export async function clearAllTopDownState() {
-  const symbols =
-    getTopDownSymbols();
-
   topDownState.clear();
 
-  databaseWriteQueue.clear();
+  try {
+    if (!pgDb.isAvailable()) {
+      return false;
+    }
 
-  if (
-    pgDb &&
-    typeof pgDb.delete ===
-      "function"
-  ) {
-    for (
-      const symbol of
-        symbols
-    ) {
-      const key =
-        getDatabaseKey(
-          symbol
-        );
+    const keys =
+      await pgDb.list(
+        TOPDOWN_DB_PREFIX
+      );
 
-      if (!key) {
-        continue;
-      }
+    let deleted = 0;
 
-      try {
+    for (const key of keys) {
+      const result =
         await pgDb.delete(
           key
         );
-      } catch (error) {
-        console.error(
-          `[TOPDOWN] PostgreSQL clear failed ${symbol}:`,
-          error?.message ||
-            error
-        );
+
+      if (result) {
+        deleted++;
       }
     }
+
+    console.log(
+      `[TOPDOWN] Cleared ${deleted} persistent CRT records.`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "[TOPDOWN] Failed to clear persistent CRT state:",
+      error.message
+    );
+
+    return false;
   }
 }
+
 
 // ============================================================
 // GET STATE SIZE
@@ -1560,6 +1356,7 @@ export async function clearAllTopDownState() {
 export function getTopDownStateSize() {
   return topDownState.size;
 }
+
 
 // ============================================================
 // GET ALL SYMBOLS
@@ -1571,30 +1368,6 @@ export function getTopDownSymbols() {
   ];
 }
 
-// ============================================================
-// GET DATABASE STATUS
-// ============================================================
-
-export function getTopDownDatabaseStatus() {
-  return {
-    enabled:
-      Boolean(
-        pgDb
-      ),
-
-    loadStarted:
-      databaseLoadStarted,
-
-    loadCompleted:
-      databaseLoadCompleted,
-
-    databaseKeyPrefix:
-      DATABASE_KEY_PREFIX,
-
-    persistence:
-      true,
-  };
-}
 
 // ============================================================
 // DEBUG STATE
@@ -1613,7 +1386,7 @@ export function getTopDownDebugState() {
 
     for (
       const timeframe of
-        TOP_DOWN_TIMEFRAMES
+      TOP_DOWN_TIMEFRAMES
     ) {
       const signal =
         symbolState.get(
@@ -1643,15 +1416,6 @@ export function getTopDownDebugState() {
               volume:
                 signal.volume,
 
-              candleTimestamp:
-                signal.candleTimestamp,
-
-              candleStart:
-                signal.candleStart,
-
-              candleEnd:
-                signal.candleEnd,
-
               storedAt:
                 signal.storedAt,
             }
@@ -1661,6 +1425,46 @@ export function getTopDownDebugState() {
 
   return result;
 }
+
+
+// ============================================================
+// GET PERSISTENCE STATUS
+// ============================================================
+
+export function isTopDownPersistenceLoaded() {
+  return topDownPersistenceLoaded;
+}
+
+
+// ============================================================
+// GET DATABASE KEY FOR DEBUGGING
+// ============================================================
+
+export function getTopDownPersistenceKey(
+  symbol,
+  timeframe
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (
+    !normalizedSymbol ||
+    !isTopDownTimeframe(
+      normalizedTimeframe
+    )
+  ) {
+    return null;
+  }
+
+  return getTopDownDatabaseKey(
+    normalizedSymbol,
+    normalizedTimeframe
+  );
+}
+
 
 // ============================================================
 // EXPORT CONSTANTS
@@ -1672,8 +1476,9 @@ export {
   ALL_TIMEFRAMES,
 };
 
+
 // ============================================================
-// STARTUP
+// SERVICE STARTUP
 // ============================================================
 
 console.log(
@@ -1704,21 +1509,5 @@ console.log(
 
 console.log(
   "[TOPDOWN] Rachel T fractal only: ENABLED"
-);
-
-console.log(
-  "[TOPDOWN] RSI: DISABLED"
-);
-
-console.log(
-  "[TOPDOWN] Standard Deviation: DISABLED"
-);
-
-console.log(
-  "[TOPDOWN] Market Structure: DISABLED"
-);
-
-console.log(
-  "[TOPDOWN] 30M: REMOVED"
 );
 ```
