@@ -2,10 +2,10 @@ import { EmbedBuilder } from "discord.js";
 import botConfig from "../../config/bot.js";
 
 // ============================================================
-// PDYN-BOT — CRT SIGNAL SERVICE
+// PDYN CRT SIGNAL SERVICE
 // ============================================================
 //
-// MARKET DATA
+// DATA SOURCES
 //
 // CRYPTO:
 //   MEXC FUTURES ONLY
@@ -13,19 +13,19 @@ import botConfig from "../../config/bot.js";
 // FOREX / METALS:
 //   OANDA
 //
-// CRT / FRACTAL SOURCE:
+// CRT LOGIC:
 //   Rachel T Fractals
 //
-// ENABLED FRACTALS:
+// ENABLED:
 //   Filtered Top Fractals
 //   Filtered Bottom Fractals
 //
-// FILTER MODE:
-//   filterBW = false
+// filterBW:
+//   false
 //
-// Therefore the source uses:
-//   isBWFractal(1)
-//   isBWFractal(-1)
+// Therefore:
+//   Filtered Top    = isBWFractal(1)
+//   Filtered Bottom = isBWFractal(-1)
 //
 // TIMEFRAMES:
 //   5m
@@ -33,80 +33,94 @@ import botConfig from "../../config/bot.js";
 //   30m
 //   1h
 //   4h
-//   1d
+//   1D
 //
 // RSI:
 //   14
 //
-// RSI DISPLAY:
-//   >= 70  OVERBOUGHT
-//   <= 30  OVERSOLD
-//   otherwise NEUTRAL
-//
 // IMPORTANT:
-//   A signal is generated from a CONFIRMED closed candle.
-//   The fractal itself is the candle at index [2].
-//   This follows the original Rachel T source's offset=-2.
+//   MEXC Futures API domain was changed from:
 //
-// RAILWAY RESTART:
-//   The service establishes a startup baseline.
-//   It does NOT resend an old signal immediately after restart.
+//   https://contract.mexc.com
+//
+//   to:
+//
+//   https://api.mexc.com
+//
+//   Do NOT use contract.mexc.com.
 //
 // ============================================================
 
 
 // ============================================================
-// CONFIGURATION
+// CONFIG
 // ============================================================
 
 const CRT_CONFIG =
-  botConfig.crt || {};
+  botConfig?.crt || {};
 
+
+// ============================================================
+// TIMEZONE
+// ============================================================
 
 const CRT_TIMEZONE =
   CRT_CONFIG.timezone ||
   "Asia/Manila";
 
 
-const DEFAULT_TIMEFRAME =
-  CRT_CONFIG.timeframe ||
-  "15m";
-
+// ============================================================
+// TIMEFRAMES
+// ============================================================
 
 const TIMEFRAMES =
   CRT_CONFIG.timeframes || {
 
-    "5m":
-      5,
+    "5m": 5,
 
-    "15m":
-      15,
+    "15m": 15,
 
-    "30m":
-      30,
+    "30m": 30,
 
-    "1h":
-      60,
+    "1h": 60,
 
-    "4h":
-      240,
+    "4h": 240,
 
-    "1d":
-      1440,
+    "1d": 1440,
   };
 
+
+// ============================================================
+// DISCORD CHANNELS
+// ============================================================
 
 const CHANNELS =
   CRT_CONFIG.channels || {};
 
 
 // ============================================================
-// MEXC FUTURES
+// MEXC FUTURES API
+// ============================================================
+//
+// IMPORTANT:
+//
+// DO NOT CHANGE THIS BACK TO:
+// https://contract.mexc.com
+//
+// MEXC officially moved Futures API access to:
+// https://api.mexc.com
+//
 // ============================================================
 
 const MEXC_BASE_URL =
-  CRT_CONFIG.mexc?.api ||
-  "https://contract.mexc.com";
+  (
+    process.env.MEXC_FUTURES_API_URL ||
+    CRT_CONFIG.mexc?.api ||
+    "https://api.mexc.com"
+  ).replace(
+    /\/+$/,
+    ""
+  );
 
 
 // ============================================================
@@ -132,13 +146,14 @@ const OANDA_ACCOUNT_ID =
 
 
 const OANDA_BASE_URL =
-  OANDA_ENVIRONMENT === "practice"
+  OANDA_ENVIRONMENT ===
+  "practice"
     ? "https://api-fxpractice.oanda.com"
     : "https://api-fxtrade.oanda.com";
 
 
 // ============================================================
-// RSI SETTINGS
+// RSI
 // ============================================================
 
 const RSI_PERIOD =
@@ -163,46 +178,44 @@ const RSI_OVERSOLD =
 
 
 // ============================================================
-// FRACTAL SETTINGS
+// RACHEL T FILTER SETTINGS
 // ============================================================
 //
-// Rachel T source:
+// The requested configuration is:
 //
-// filterBW = input(false)
+// Filtered Top Fractals     = ON
+// Filtered Bottom Fractals  = ON
 //
-// filteredtopf = filterBW
-//   ? isRegularFractal(1)
-//   : isBWFractal(1)
-//
-// filteredbotf = filterBW
-//   ? isRegularFractal(-1)
-//   : isBWFractal(-1)
-//
-// Therefore:
+// All other source settings
+// are intentionally ignored.
 //
 // filterBW = false
 //
 // ============================================================
 
 const FILTER_BW =
-  CRT_CONFIG.filterBW === true;
+  false;
 
-
-// ============================================================
-// SIGNAL SETTINGS
-// ============================================================
 
 const FILTERED_TOP_ENABLED =
-  CRT_CONFIG.filteredTop !== false;
+  true;
 
 
 const FILTERED_BOTTOM_ENABLED =
-  CRT_CONFIG.filteredBottom !== false;
+  true;
 
 
 // ============================================================
 // REQUEST SETTINGS
 // ============================================================
+
+const REQUEST_TIMEOUT =
+  15000;
+
+
+const CANDLE_LIMIT =
+  220;
+
 
 const CHECK_INTERVAL =
   Number(
@@ -214,51 +227,27 @@ const CHECK_INTERVAL =
     : 5000;
 
 
-const CANDLE_LIMIT =
-  220;
-
-
 // ============================================================
-// FETCH TIMEOUT
-// ============================================================
-
-const REQUEST_TIMEOUT =
-  15000;
-
-
-// ============================================================
-// MEXC REQUEST CONCURRENCY
+// CONCURRENCY
 // ============================================================
 //
-// MEXC has many Futures contracts.
-// Do not request every symbol simultaneously.
+// Keep this reasonably low.
+//
+// Do not hammer MEXC with hundreds of
+// simultaneous requests.
 //
 // ============================================================
 
 const MEXC_CONCURRENCY =
-  8;
+  4;
+
+
+const OANDA_CONCURRENCY =
+  3;
 
 
 // ============================================================
-// OANDA SYMBOL CACHE
-// ============================================================
-
-let oandaInstrumentsCache =
-  null;
-
-
-let oandaInstrumentsCacheTime =
-  0;
-
-
-const OANDA_CACHE_TIME =
-  30 *
-  60 *
-  1000;
-
-
-// ============================================================
-// MEXC SYMBOL CACHE
+// CACHE
 // ============================================================
 
 let mexcSymbolsCache =
@@ -275,17 +264,33 @@ const MEXC_SYMBOL_CACHE_TIME =
   1000;
 
 
+let oandaInstrumentsCache =
+  null;
+
+
+let oandaInstrumentsCacheTime =
+  0;
+
+
+const OANDA_CACHE_TIME =
+  30 *
+  60 *
+  1000;
+
+
 // ============================================================
-// SIGNAL STATE
+// STATE
 // ============================================================
 //
-// Key:
+// key:
 //
-// provider|symbol|timeframe
+// MEXC|BTC_USDT|5m
 //
-// Value:
+// OANDA|XAU_USD|1h
 //
-// last processed signal candle timestamp
+// value:
+//
+// last processed fractal timestamp
 //
 // ============================================================
 
@@ -297,8 +302,8 @@ const signalState =
 // STARTUP BASELINE
 // ============================================================
 //
-// This prevents Railway restart from immediately sending the
-// previous confirmed fractal again.
+// Prevents Railway restart from immediately
+// repeating an old signal.
 //
 // ============================================================
 
@@ -307,7 +312,7 @@ const startupBaseline =
 
 
 // ============================================================
-// ACTIVE MONITOR
+// MONITOR STATE
 // ============================================================
 
 let crtMonitorStarted =
@@ -319,7 +324,25 @@ let monitorTimer =
 
 
 // ============================================================
-// GENERIC FETCH
+// TEMPORARY BLOCK STATE
+// ============================================================
+//
+// If MEXC returns 403, do not continuously
+// hammer the endpoint.
+//
+// ============================================================
+
+let mexcBlockedUntil =
+  0;
+
+
+const MEXC_BLOCK_COOLDOWN =
+  60 *
+  1000;
+
+
+// ============================================================
+// FETCH JSON
 // ============================================================
 
 async function fetchJson(
@@ -333,8 +356,9 @@ async function fetchJson(
 
   const timeout =
     setTimeout(
-      () =>
-        controller.abort(),
+      () => {
+        controller.abort();
+      },
       REQUEST_TIMEOUT
     );
 
@@ -351,8 +375,12 @@ async function fetchJson(
             controller.signal,
 
           headers: {
+
             Accept:
               "application/json",
+
+            "User-Agent":
+              "PDYN-CRT-Bot/1.0",
 
             ...(options.headers ||
               {}),
@@ -365,24 +393,23 @@ async function fetchJson(
       await response.text();
 
 
-    let data;
+    let data =
+      null;
 
 
     try {
 
       data =
-        JSON.parse(
-          text
-        );
+        text
+          ? JSON.parse(
+              text
+            )
+          : null;
 
     } catch {
 
-      throw new Error(
-        `Invalid JSON response from ${url}: ${text.slice(
-          0,
-          200
-        )}`
-      );
+      data =
+        null;
     }
 
 
@@ -390,16 +417,28 @@ async function fetchJson(
       !response.ok
     ) {
 
-      throw new Error(
-        `HTTP ${response.status} from ${url}: ${
-          data?.msg ||
-          data?.message ||
-          text.slice(
-            0,
-            200
-          )
-        }`
-      );
+      const error =
+        new Error(
+          `HTTP ${response.status}: ${
+            data?.msg ||
+            data?.message ||
+            text.slice(
+              0,
+              250
+            )
+          }`
+        );
+
+
+      error.status =
+        response.status;
+
+
+      error.url =
+        url;
+
+
+      throw error;
     }
 
 
@@ -415,7 +454,7 @@ async function fetchJson(
 
 
 // ============================================================
-// MEXC TIMEFRAME
+// MEXC INTERVAL
 // ============================================================
 
 function getMexcInterval(
@@ -454,7 +493,7 @@ function getMexcInterval(
 
 
 // ============================================================
-// OANDA TIMEFRAME
+// OANDA GRANULARITY
 // ============================================================
 
 function getOandaGranularity(
@@ -518,7 +557,7 @@ export function isValidCRTTimeframe(
 
 
 // ============================================================
-// AVAILABLE TIMEFRAMES
+// GET AVAILABLE TIMEFRAMES
 // ============================================================
 
 export function getAvailableCRTTimeframes() {
@@ -530,7 +569,7 @@ export function getAvailableCRTTimeframes() {
 
 
 // ============================================================
-// TIMEZONE
+// GET ZONED PARTS
 // ============================================================
 
 function getZonedParts(
@@ -602,7 +641,7 @@ function getZonedParts(
 
 
 // ============================================================
-// CURRENT CRT TIME
+// GET CURRENT CRT TIME
 // ============================================================
 
 export function getCRTNow() {
@@ -623,16 +662,15 @@ function pad(
 
   return String(
     value
-  )
-    .padStart(
-      2,
-      "0"
-    );
+  ).padStart(
+    2,
+    "0"
+  );
 }
 
 
 // ============================================================
-// DATE FORMAT
+// FORMAT DATE
 // ============================================================
 
 function formatDateParts(
@@ -648,7 +686,7 @@ function formatDateParts(
 
 
 // ============================================================
-// TIME FORMAT
+// FORMAT TIME
 // ============================================================
 
 function formatTimeParts(
@@ -664,7 +702,7 @@ function formatTimeParts(
 
 
 // ============================================================
-// TIME WITH SECONDS
+// FORMAT TIME WITH SECONDS
 // ============================================================
 
 function formatTimeSeconds(
@@ -682,15 +720,11 @@ function formatTimeSeconds(
 
 
 // ============================================================
-// CURRENT CRT CANDLE
-// ============================================================
-//
-// Kept for compatibility with the existing bot commands.
-//
+// CURRENT CRT
 // ============================================================
 
 export function getCurrentCRT(
-  timeframe = DEFAULT_TIMEFRAME
+  timeframe = "15m"
 ) {
 
   timeframe =
@@ -706,13 +740,7 @@ export function getCurrentCRT(
   ) {
 
     throw new Error(
-      `Invalid CRT timeframe "${timeframe}". ` +
-      `Available: ${
-        getAvailableCRTTimeframes()
-          .join(
-            ", "
-          )
-      }`
+      `Invalid CRT timeframe "${timeframe}".`
     );
   }
 
@@ -838,53 +866,6 @@ export function getCurrentCRT(
     60;
 
 
-  let endYear =
-    now.year;
-
-
-  let endMonth =
-    now.month;
-
-
-  let endDay =
-    now.day;
-
-
-  if (
-    endTotalMinutes >=
-    1440
-  ) {
-
-    const next =
-      new Date(
-        Date.UTC(
-          now.year,
-          now.month - 1,
-          now.day
-        )
-      );
-
-
-    next.setUTCDate(
-      next.getUTCDate() +
-      1
-    );
-
-
-    endYear =
-      next.getUTCFullYear();
-
-
-    endMonth =
-      next.getUTCMonth() +
-      1;
-
-
-    endDay =
-      next.getUTCDate();
-  }
-
-
   const startTimestamp =
     Date.UTC(
       now.year,
@@ -897,14 +878,10 @@ export function getCurrentCRT(
 
 
   const endTimestamp =
-    Date.UTC(
-      endYear,
-      endMonth - 1,
-      endDay,
-      endHour - 8,
-      endMinute,
-      0
-    );
+    startTimestamp +
+    minutes *
+    60 *
+    1000;
 
 
   return {
@@ -954,7 +931,7 @@ export function getCurrentCRT(
 // ============================================================
 
 export function getRemainingTime(
-  timeframe = DEFAULT_TIMEFRAME
+  timeframe = "15m"
 ) {
 
   const crt =
@@ -963,19 +940,12 @@ export function getRemainingTime(
     );
 
 
-  let remaining =
-    crt.endTimestamp -
-    Date.now();
-
-
-  if (
-    remaining <
-    0
-  ) {
-
-    remaining =
-      0;
-  }
+  const remaining =
+    Math.max(
+      0,
+      crt.endTimestamp -
+        Date.now()
+    );
 
 
   const totalSeconds =
@@ -1032,7 +1002,7 @@ export function getRemainingTime(
 // ============================================================
 
 export function getCRTStatus(
-  timeframe = DEFAULT_TIMEFRAME
+  timeframe = "15m"
 ) {
 
   const crt =
@@ -1087,7 +1057,7 @@ export function getCRTStatus(
 
 
 // ============================================================
-// MEXC SYMBOL NORMALIZATION
+// NORMALIZE MEXC SYMBOL
 // ============================================================
 
 function normalizeMexcSymbol(
@@ -1107,13 +1077,11 @@ function normalizeMexcSymbol(
 // GET MEXC FUTURES SYMBOLS
 // ============================================================
 //
-// MEXC Futures contract detail endpoint:
+// IMPORTANT:
 //
-// GET /api/v1/contract/detail
+// This is FUTURES.
 //
-// Only active USDT-settled Futures contracts are returned.
-//
-// Spot is never requested.
+// No Spot API is used.
 //
 // ============================================================
 
@@ -1134,120 +1102,159 @@ async function getMexcFuturesSymbols() {
   }
 
 
-  const url =
-    `${MEXC_BASE_URL}/api/v1/contract/detail`;
+  if (
+    now <
+    mexcBlockedUntil
+  ) {
 
-
-  const response =
-    await fetchJson(
-      url
+    console.warn(
+      "[CRT] MEXC temporarily paused after access denial."
     );
 
 
-  const contracts =
-    Array.isArray(
-      response?.data
-    )
-      ? response.data
-      : [];
+    return [];
+  }
 
 
-  const symbols =
-    contracts
-
-      .filter(
-        (contract) => {
-
-          const symbol =
-            normalizeMexcSymbol(
-              contract.symbol
-            );
-
-
-          const quoteCoin =
-            String(
-              contract.quoteCoin ||
-              ""
-            )
-              .toUpperCase();
-
-
-          const settleCoin =
-            String(
-              contract.settleCoin ||
-              ""
-            )
-              .toUpperCase();
-
-
-          const state =
-            Number(
-              contract.state
-            );
-
-
-          const isUsdt =
-            quoteCoin ===
-              "USDT" ||
-            settleCoin ===
-              "USDT" ||
-            symbol.endsWith(
-              "USDT"
-            );
-
-
-          const active =
-            !Number.isFinite(
-              state
-            ) ||
-            state ===
-              0;
-
-
-          return (
-            Boolean(
-              symbol
-            ) &&
-            isUsdt &&
-            active
-          );
-        }
-      )
-
-      .map(
-        (contract) =>
-          normalizeMexcSymbol(
-            contract.symbol
-          )
-      )
-
-      .filter(
-        Boolean
-      );
-
-
-  const unique =
-    [
-      ...new Set(
-        symbols
-      ),
-    ];
-
-
-  mexcSymbolsCache =
-    unique;
-
-
-  mexcSymbolsCacheTime =
-    now;
+  const url =
+    `${MEXC_BASE_URL}` +
+    `/api/v1/contract/detail`;
 
 
   console.log(
-    `[CRT] MEXC Futures symbols loaded: ${unique.length}`
+    `[CRT] MEXC Futures contracts: ${url}`
   );
 
 
-  return unique;
+  try {
+
+    const response =
+      await fetchJson(
+        url
+      );
+
+
+    const contracts =
+      Array.isArray(
+        response?.data
+      )
+        ? response.data
+        : [];
+
+
+    const symbols =
+      contracts
+
+        .filter(
+          (contract) => {
+
+            const symbol =
+              normalizeMexcSymbol(
+                contract?.symbol
+              );
+
+
+            const quoteCoin =
+              String(
+                contract?.quoteCoin ||
+                ""
+              )
+                .toUpperCase();
+
+
+            const settleCoin =
+              String(
+                contract?.settleCoin ||
+                ""
+              )
+                .toUpperCase();
+
+
+            const isUSDT =
+              quoteCoin ===
+                "USDT" ||
+              settleCoin ===
+                "USDT" ||
+              symbol.endsWith(
+                "_USDT"
+              ) ||
+              symbol.endsWith(
+                "USDT"
+              );
+
+
+            return (
+              Boolean(
+                symbol
+              ) &&
+              isUSDT
+            );
+          }
+        )
+
+        .map(
+          (
+            contract
+          ) =>
+            normalizeMexcSymbol(
+              contract.symbol
+            )
+        )
+
+        .filter(
+          Boolean
+        );
+
+
+    mexcSymbolsCache =
+      [
+        ...new Set(
+          symbols
+        ),
+      ];
+
+
+    mexcSymbolsCacheTime =
+      now;
+
+
+    console.log(
+      `[CRT] MEXC Futures contracts loaded: ${mexcSymbolsCache.length}`
+    );
+
+
+    return mexcSymbolsCache;
+
+  } catch (
+    error
+  ) {
+
+    if (
+      error.status ===
+        403 ||
+      error.status ===
+        401
+    ) {
+
+      mexcBlockedUntil =
+        Date.now() +
+        MEXC_BLOCK_COOLDOWN;
+
+
+      console.error(
+        `[CRT] MEXC access denied (${error.status}). ` +
+        `Pausing MEXC requests for 60 seconds.`
+      );
+
+
+      console.error(
+        `[CRT] Verify Railway outbound access and MEXC API availability.`
+      );
+    }
+
+
+    throw error;
+  }
 }
 
 
@@ -1255,9 +1262,9 @@ async function getMexcFuturesSymbols() {
 // MEXC KLINE
 // ============================================================
 //
-// Endpoint:
+// Correct current MEXC Futures API:
 //
-// /api/v1/contract/kline/{symbol}
+// https://api.mexc.com/api/v1/contract/kline/{symbol}
 //
 // ============================================================
 
@@ -1265,6 +1272,29 @@ async function fetchMexcCandles(
   symbol,
   timeframe
 ) {
+
+  if (
+    Date.now() <
+    mexcBlockedUntil
+  ) {
+
+    return [];
+  }
+
+
+  const normalizedSymbol =
+    normalizeMexcSymbol(
+      symbol
+    );
+
+
+  if (
+    !normalizedSymbol
+  ) {
+
+    return [];
+  }
+
 
   const interval =
     getMexcInterval(
@@ -1276,7 +1306,7 @@ async function fetchMexcCandles(
     `${MEXC_BASE_URL}` +
     `/api/v1/contract/kline/` +
     `${encodeURIComponent(
-      symbol
+      normalizedSymbol
     )}` +
     `?interval=${encodeURIComponent(
       interval
@@ -1284,11 +1314,85 @@ async function fetchMexcCandles(
     `&limit=${CANDLE_LIMIT}`;
 
 
-  const response =
-    await fetchJson(
-      url
+  try {
+
+    const response =
+      await fetchJson(
+        url
+      );
+
+
+    return parseMexcKlineResponse(
+      response
     );
 
+  } catch (
+    error
+  ) {
+
+    if (
+      error.status ===
+        403 ||
+      error.status ===
+        401
+    ) {
+
+      mexcBlockedUntil =
+        Date.now() +
+        MEXC_BLOCK_COOLDOWN;
+
+
+      console.error(
+        `[CRT] MEXC access denied for ${normalizedSymbol}.`
+      );
+
+
+      console.error(
+        `[CRT] URL: ${url}`
+      );
+
+
+      console.error(
+        `[CRT] MEXC requests paused for 60 seconds.`
+      );
+
+
+      return [];
+    }
+
+
+    if (
+      error.status ===
+      429
+    ) {
+
+      mexcBlockedUntil =
+        Date.now() +
+        30 *
+        1000;
+
+
+      console.warn(
+        `[CRT] MEXC rate limited. Pausing for 30 seconds.`
+      );
+
+
+      return [];
+    }
+
+
+    throw error;
+  }
+}
+
+
+// ============================================================
+// PARSE MEXC KLINE
+// ============================================================
+
+function parseMexcKlineResponse(
+  response
+) {
 
   const data =
     response?.data;
@@ -1303,7 +1407,7 @@ async function fetchMexcCandles(
 
 
   // ----------------------------------------------------------
-  // MEXC common Futures response format:
+  // FORMAT 1
   //
   // {
   //   time: [],
@@ -1336,15 +1440,15 @@ async function fetchMexcCandles(
       i++
     ) {
 
+      const timestamp =
+        normalizeTimestamp(
+          data.time[i]
+        );
+
+
       const candle = {
 
-        timestamp:
-          Number(
-            data.time[
-              i
-            ]
-          ) *
-          1000,
+        timestamp,
 
         open:
           Number(
@@ -1379,26 +1483,17 @@ async function fetchMexcCandles(
             data.vol?.[
               i
             ] ||
+            data.volume?.[
+              i
+            ] ||
             0
           ),
       };
 
 
       if (
-        Number.isFinite(
-          candle.timestamp
-        ) &&
-        Number.isFinite(
-          candle.open
-        ) &&
-        Number.isFinite(
-          candle.high
-        ) &&
-        Number.isFinite(
-          candle.low
-        ) &&
-        Number.isFinite(
-          candle.close
+        isValidCandle(
+          candle
         )
       ) {
 
@@ -1409,20 +1504,22 @@ async function fetchMexcCandles(
     }
 
 
-    return candles
-      .sort(
-        (
-          a,
-          b
-        ) =>
-          a.timestamp -
-          b.timestamp
-      );
+    return candles.sort(
+      (
+        a,
+        b
+      ) =>
+        a.timestamp -
+        b.timestamp
+    );
   }
 
 
   // ----------------------------------------------------------
-  // Array response fallback
+  // FORMAT 2
+  //
+  // [[time, open, close, high, low, volume]]
+  //
   // ----------------------------------------------------------
 
   if (
@@ -1434,7 +1531,9 @@ async function fetchMexcCandles(
     return data
 
       .map(
-        (row) => {
+        (
+          row
+        ) => {
 
           if (
             Array.isArray(
@@ -1445,10 +1544,9 @@ async function fetchMexcCandles(
             return {
 
               timestamp:
-                Number(
+                normalizeTimestamp(
                   row[0]
-                ) *
-                1000,
+                ),
 
               open:
                 Number(
@@ -1482,35 +1580,34 @@ async function fetchMexcCandles(
           return {
 
             timestamp:
-              Number(
-                row.time
-              ) *
-              1000,
+              normalizeTimestamp(
+                row?.time
+              ),
 
             open:
               Number(
-                row.open
+                row?.open
               ),
 
             high:
               Number(
-                row.high
+                row?.high
               ),
 
             low:
               Number(
-                row.low
+                row?.low
               ),
 
             close:
               Number(
-                row.close
+                row?.close
               ),
 
             volume:
               Number(
-                row.vol ||
-                row.volume ||
+                row?.vol ||
+                row?.volume ||
                 0
               ),
           };
@@ -1537,7 +1634,47 @@ async function fetchMexcCandles(
 
 
 // ============================================================
-// OANDA REQUEST HEADERS
+// NORMALIZE TIMESTAMP
+// ============================================================
+
+function normalizeTimestamp(
+  value
+) {
+
+  const number =
+    Number(
+      value
+    );
+
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+
+    return NaN;
+  }
+
+
+  // Seconds
+  if (
+    number <
+    100000000000
+  ) {
+
+    return number *
+      1000;
+  }
+
+
+  // Milliseconds
+  return number;
+}
+
+
+// ============================================================
+// OANDA HEADERS
 // ============================================================
 
 function getOandaHeaders() {
@@ -1556,13 +1693,6 @@ function getOandaHeaders() {
 // ============================================================
 // GET OANDA INSTRUMENTS
 // ============================================================
-//
-// OANDA account instruments endpoint returns the instruments
-// actually available to the account.
-//
-// This means XAUUSD comes from OANDA rather than MEXC.
-//
-// ============================================================
 
 async function getOandaInstruments() {
 
@@ -1572,7 +1702,7 @@ async function getOandaInstruments() {
   ) {
 
     console.warn(
-      "[CRT] OANDA credentials are not configured."
+      "[CRT] OANDA credentials are missing."
     );
 
 
@@ -1604,50 +1734,69 @@ async function getOandaInstruments() {
     `/instruments`;
 
 
-  const response =
-    await fetchJson(
-      url,
-      {
-        headers:
-          getOandaHeaders(),
-      }
-    );
+  try {
 
-
-  const instruments =
-    Array.isArray(
-      response?.instruments
-    )
-      ? response.instruments
-      : [];
-
-
-  oandaInstrumentsCache =
-    instruments
-      .map(
-        (instrument) =>
-          instrument.name
-      )
-      .filter(
-        Boolean
+    const response =
+      await fetchJson(
+        url,
+        {
+          headers:
+            getOandaHeaders(),
+        }
       );
 
 
-  oandaInstrumentsCacheTime =
-    now;
+    const instruments =
+      Array.isArray(
+        response?.instruments
+      )
+        ? response.instruments
+        : [];
 
 
-  console.log(
-    `[CRT] OANDA instruments loaded: ${oandaInstrumentsCache.length}`
-  );
+    oandaInstrumentsCache =
+      instruments
+
+        .map(
+          (
+            instrument
+          ) =>
+            instrument.name
+        )
+
+        .filter(
+          Boolean
+        );
 
 
-  return oandaInstrumentsCache;
+    oandaInstrumentsCacheTime =
+      now;
+
+
+    console.log(
+      `[CRT] OANDA instruments loaded: ${oandaInstrumentsCache.length}`
+    );
+
+
+    return oandaInstrumentsCache;
+
+  } catch (
+    error
+  ) {
+
+    console.error(
+      "[CRT] OANDA instruments error:",
+      error.message
+    );
+
+
+    return [];
+  }
 }
 
 
 // ============================================================
-// OANDA KLINE
+// OANDA CANDLES
 // ============================================================
 
 async function fetchOandaCandles(
@@ -1703,13 +1852,17 @@ async function fetchOandaCandles(
   return candles
 
     .filter(
-      (candle) =>
+      (
+        candle
+      ) =>
         candle.complete ===
         true
     )
 
     .map(
-      (candle) => {
+      (
+        candle
+      ) => {
 
         const mid =
           candle.mid ||
@@ -1825,7 +1978,9 @@ export function calculateRSI(
 
   const closes =
     candles.map(
-      (candle) =>
+      (
+        candle
+      ) =>
         Number(
           candle.close
         )
@@ -1942,18 +2097,29 @@ export function calculateRSI(
   }
 
 
-  const relativeStrength =
+  if (
+    averageGain ===
+    0
+  ) {
+
+    return 0;
+  }
+
+
+  const rs =
     averageGain /
     averageLoss;
 
 
   return (
     100 -
-    100 /
+    (
+      100 /
       (
         1 +
-        relativeStrength
+        rs
       )
+    )
   );
 }
 
@@ -1999,176 +2165,15 @@ function getRSIState(
 
 
 // ============================================================
-// RACHEL T — REGULAR FRACTAL
+// RACHEL T — BW TOP FRACTAL
 // ============================================================
 //
-// Exact source:
+// isBWFractal(1)
 //
-// isRegularFractal(mode) =>
-//
-// mode == 1 ?
-//   high[4] < high[3] and
-//   high[3] < high[2] and
-//   high[2] > high[1] and
-//   high[1] > high[0]
-//
-// mode == -1 ?
-//   low[4] > low[3] and
-//   low[3] > low[2] and
-//   low[2] < low[1] and
-//   low[1] < low[0]
-//
-// ============================================================
-
-function isRegularTop(
-  candles,
-  index
-) {
-
-  if (
-    index <
-      4 ||
-    index >=
-      candles.length
-  ) {
-
-    return false;
-  }
-
-
-  const c4 =
-    candles[
-      index - 4
-    ];
-
-
-  const c3 =
-    candles[
-      index - 3
-    ];
-
-
-  const c2 =
-    candles[
-      index - 2
-    ];
-
-
-  const c1 =
-    candles[
-      index - 1
-    ];
-
-
-  const c0 =
-    candles[
-      index
-    ];
-
-
-  return (
-
-    c4.high <
-      c3.high &&
-
-    c3.high <
-      c2.high &&
-
-    c2.high >
-      c1.high &&
-
-    c1.high >
-      c0.high
-  );
-}
-
-
-// ============================================================
-// RACHEL T — REGULAR BOTTOM
-// ============================================================
-
-function isRegularBottom(
-  candles,
-  index
-) {
-
-  if (
-    index <
-      4 ||
-    index >=
-      candles.length
-  ) {
-
-    return false;
-  }
-
-
-  const c4 =
-    candles[
-      index - 4
-    ];
-
-
-  const c3 =
-    candles[
-      index - 3
-    ];
-
-
-  const c2 =
-    candles[
-      index - 2
-    ];
-
-
-  const c1 =
-    candles[
-      index - 1
-    ];
-
-
-  const c0 =
-    candles[
-      index
-    ];
-
-
-  return (
-
-    c4.low >
-      c3.low &&
-
-    c3.low >
-      c2.low &&
-
-    c2.low <
-      c1.low &&
-
-    c1.low <
-      c0.low
-  );
-}
-
-
-// ============================================================
-// RACHEL T — BILL WILLIAMS FRACTAL
-// ============================================================
-//
-// EXACT SOURCE:
-//
-// isBWFractal(mode) =>
-//
-// mode == 1 ?
-//   high[4] < high[2] and
-//   high[3] <= high[2] and
-//   high[2] >= high[1] and
-//   high[2] > high[0]
-//
-// mode == -1 ?
-//   low[4] > low[2] and
-//   low[3] >= low[2] and
-//   low[2] <= low[1] and
-//   low[2] < low[0]
+// high[4] < high[2]
+// high[3] <= high[2]
+// high[2] >= high[1]
+// high[2] > high[0]
 //
 // ============================================================
 
@@ -2236,7 +2241,16 @@ function isBWTop(
 
 
 // ============================================================
-// RACHEL T — BILL WILLIAMS BOTTOM
+// RACHEL T — BW BOTTOM FRACTAL
+// ============================================================
+//
+// isBWFractal(-1)
+//
+// low[4] > low[2]
+// low[3] >= low[2]
+// low[2] <= low[1]
+// low[2] < low[0]
+//
 // ============================================================
 
 function isBWBottom(
@@ -2305,16 +2319,6 @@ function isBWBottom(
 // ============================================================
 // FILTERED TOP
 // ============================================================
-//
-// filterBW = false
-// → isBWFractal
-//
-// filterBW = true
-// → isRegularFractal
-//
-// This exactly follows the source.
-//
-// ============================================================
 
 function isFilteredTop(
   candles,
@@ -2325,10 +2329,7 @@ function isFilteredTop(
     FILTER_BW
   ) {
 
-    return isRegularTop(
-      candles,
-      index
-    );
+    return false;
   }
 
 
@@ -2352,10 +2353,7 @@ function isFilteredBottom(
     FILTER_BW
   ) {
 
-    return isRegularBottom(
-      candles,
-      index
-    );
+    return false;
   }
 
 
@@ -2367,16 +2365,7 @@ function isFilteredBottom(
 
 
 // ============================================================
-// FIND LAST FILTERED FRACTAL
-// ============================================================
-//
-// The source uses offset=-2.
-//
-// Therefore:
-//
-// index = current closed candle
-// index-2 = actual fractal candle
-//
+// FIND LAST FRACTAL
 // ============================================================
 
 function findLastFilteredFractal(
@@ -2392,23 +2381,10 @@ function findLastFilteredFractal(
   }
 
 
-  // ----------------------------------------------------------
-  // Current final candle must be closed.
-  // ----------------------------------------------------------
-
   const lastIndex =
     candles.length -
     1;
 
-
-  // ----------------------------------------------------------
-  // Search newest confirmed fractal.
-  //
-  // We intentionally do NOT inspect index = lastIndex
-  // as a fractal because the original source needs
-  // high[4] ... high[0].
-  //
-  // ----------------------------------------------------------
 
   for (
     let index =
@@ -2497,7 +2473,7 @@ function findLastFilteredFractal(
 
 
 // ============================================================
-// FIND NEWEST FRACTAL AFTER TIMESTAMP
+// FIND NEW FRACTAL
 // ============================================================
 
 function findNewestFractalAfter(
@@ -2615,7 +2591,7 @@ function findNewestFractalAfter(
 
 
 // ============================================================
-// PROCESS ONE MARKET
+// PROCESS MARKET
 // ============================================================
 
 async function processMarket(
@@ -2638,10 +2614,6 @@ async function processMarket(
   }
 
 
-  // ----------------------------------------------------------
-  // Calculate RSI using the completed candle set.
-  // ----------------------------------------------------------
-
   const rsi =
     calculateRSI(
       candles,
@@ -2655,37 +2627,29 @@ async function processMarket(
     );
 
 
-  // ----------------------------------------------------------
-  // State key
-  // ----------------------------------------------------------
-
   const stateKey =
     `${provider}|${symbol}|${timeframe}`;
 
 
-  const previousSignalTimestamp =
+  const previousTimestamp =
     signalState.get(
       stateKey
     );
 
-
-  // ----------------------------------------------------------
-  // Find newest confirmed Rachel fractal.
-  // ----------------------------------------------------------
 
   let signal;
 
 
   if (
     Number.isFinite(
-      previousSignalTimestamp
+      previousTimestamp
     )
   ) {
 
     signal =
       findNewestFractalAfter(
         candles,
-        previousSignalTimestamp
+        previousTimestamp
       );
 
   } else {
@@ -2706,14 +2670,11 @@ async function processMarket(
 
 
   // ----------------------------------------------------------
-  // STARTUP BASELINE
-  // ----------------------------------------------------------
+  // FIRST SCAN AFTER RAILWAY RESTART
   //
-  // First scan after Railway restart:
+  // Register the latest known fractal.
   //
-  // Do not send the old fractal.
-  //
-  // Register it as the baseline.
+  // Do not send an old signal.
   //
   // ----------------------------------------------------------
 
@@ -2735,7 +2696,7 @@ async function processMarket(
 
 
     console.log(
-      `[CRT] Baseline ${provider} ${symbol} ${timeframe}: ${signal.fractalType} ${signal.timestamp}`
+      `[CRT] Baseline | ${provider} | ${symbol} | ${timeframe} | ${signal.fractalType}`
     );
 
 
@@ -2744,7 +2705,7 @@ async function processMarket(
 
 
   // ----------------------------------------------------------
-  // Duplicate protection
+  // DUPLICATE PROTECTION
   // ----------------------------------------------------------
 
   if (
@@ -2762,9 +2723,7 @@ async function processMarket(
 
 
   // ----------------------------------------------------------
-  // Save state BEFORE sending.
-  //
-  // This prevents duplicate alerts if Discord/API retries.
+  // SAVE BEFORE SEND
   // ----------------------------------------------------------
 
   signalState.set(
@@ -2774,7 +2733,7 @@ async function processMarket(
 
 
   // ----------------------------------------------------------
-  // Send signal
+  // SEND
   // ----------------------------------------------------------
 
   await sendCRTSignal(
@@ -2791,15 +2750,13 @@ async function processMarket(
       rsi,
 
       rsiState,
-
-      candles,
     }
   );
 }
 
 
 // ============================================================
-// PRICE FORMAT
+// FORMAT PRICE
 // ============================================================
 
 function formatPrice(
@@ -2870,7 +2827,7 @@ function formatPrice(
 
 
 // ============================================================
-// RSI FORMAT
+// FORMAT RSI
 // ============================================================
 
 function formatRSI(
@@ -2894,7 +2851,7 @@ function formatRSI(
 
 
 // ============================================================
-// SIGNAL TIME
+// FORMAT SIGNAL TIME
 // ============================================================
 
 function formatSignalTime(
@@ -2904,7 +2861,6 @@ function formatSignalTime(
   return new Intl.DateTimeFormat(
     "en-US",
     {
-
       timeZone:
         CRT_TIMEZONE,
 
@@ -2935,7 +2891,7 @@ function formatSignalTime(
 
 
 // ============================================================
-// SIGNAL EMBED
+// CREATE DISCORD EMBED
 // ============================================================
 
 function createSignalEmbed(
@@ -2965,6 +2921,12 @@ function createSignalEmbed(
     "BUY";
 
 
+  const title =
+    isBuy
+      ? "🟢 CRT BUY SIGNAL"
+      : "🔴 CRT SELL SIGNAL";
+
+
   const color =
     isBuy
       ? (
@@ -2979,121 +2941,112 @@ function createSignalEmbed(
         );
 
 
-  const emoji =
-    isBuy
-      ? "🟢"
-      : "🔴";
+  return new EmbedBuilder()
 
+    .setTitle(
+      title
+    )
 
-  const title =
-    isBuy
-      ? "CRT BUY SIGNAL"
-      : "CRT SELL SIGNAL";
+    .setDescription(
+      `**${symbol}**`
+    )
 
+    .addFields(
 
-  const embed =
-    new EmbedBuilder()
-      .setTitle(
-        `${emoji} ${title}`
+      {
+        name:
+          "TIMEFRAME",
+
+        value:
+          `\`${timeframe.toUpperCase()}\``,
+
+        inline:
+          true,
+      },
+
+      {
+        name:
+          "SIGNAL PRICE",
+
+        value:
+          `\`${formatPrice(
+            signal.price
+          )}\``,
+
+        inline:
+          true,
+      },
+
+      {
+        name:
+          "RSI",
+
+        value:
+          `\`${formatRSI(
+            rsi
+          )}\``,
+
+        inline:
+          true,
+      },
+
+      {
+        name:
+          "RSI STATUS",
+
+        value:
+          `\`${rsiState}\``,
+
+        inline:
+          true,
+      },
+
+      {
+        name:
+          "SIGNAL",
+
+        value:
+          `\`${signal.type}\``,
+
+        inline:
+          true,
+      },
+
+      {
+        name:
+          "CANDLE",
+
+        value:
+          `\`${formatSignalTime(
+            signal.timestamp
+          )}\``,
+
+        inline:
+          true,
+      }
+
+    )
+
+    .setColor(
+      color
+    )
+
+    .setFooter({
+      text:
+        CRT_CONFIG.footer ||
+        "CRT • PDYN",
+    })
+
+    .setTimestamp(
+      new Date(
+        signal.timestamp
       )
-      .setDescription(
-        `**${symbol}**`
-      )
-      .addFields(
-
-        {
-          name:
-            "TIMEFRAME",
-
-          value:
-            `\`${timeframe.toUpperCase()}\``,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            "SIGNAL PRICE",
-
-          value:
-            `\`${formatPrice(
-              signal.price
-            )}\``,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            "RSI",
-
-          value:
-            `\`${formatRSI(
-              rsi
-            )}\``,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            "RSI STATUS",
-
-          value:
-            `\`${rsiState}\``,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            "SIGNAL",
-
-          value:
-            `\`${signal.type}\``,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            "CANDLE",
-
-          value:
-            `\`${formatSignalTime(
-              signal.timestamp
-            )}\``,
-
-          inline:
-            true,
-        }
-      )
-      .setColor(
-        color
-      )
-      .setFooter({
-        text:
-          CRT_CONFIG.footer ||
-          "CRT • PDYN",
-      })
-      .setTimestamp(
-        new Date(
-          signal.timestamp
-        )
-      );
-
-
-  return embed;
+    );
 }
 
 
 // ============================================================
-// SEND SIGNAL
+// SEND CRT SIGNAL
 // ============================================================
 
 async function sendCRTSignal(
@@ -3103,13 +3056,9 @@ async function sendCRTSignal(
 
   try {
 
-    const timeframe =
-      data.timeframe;
-
-
     const channelId =
       CHANNELS[
-        timeframe
+        data.timeframe
       ];
 
 
@@ -3118,7 +3067,7 @@ async function sendCRTSignal(
     ) {
 
       console.warn(
-        `[CRT] No Discord channel configured for ${timeframe}.`
+        `[CRT] No Discord channel configured for ${data.timeframe}.`
       );
 
 
@@ -3133,25 +3082,13 @@ async function sendCRTSignal(
 
 
     if (
-      !channel
-    ) {
-
-      console.warn(
-        `[CRT] Discord channel not found: ${channelId}`
-      );
-
-
-      return;
-    }
-
-
-    if (
+      !channel ||
       typeof channel.send !==
-      "function"
+        "function"
     ) {
 
       console.warn(
-        `[CRT] Discord channel cannot receive messages: ${channelId}`
+        `[CRT] Invalid Discord channel: ${channelId}`
       );
 
 
@@ -3174,21 +3111,14 @@ async function sendCRTSignal(
 
 
     console.log(
-
       `[CRT] SIGNAL SENT | ` +
-
       `${data.provider} | ` +
-
       `${data.symbol} | ` +
-
       `${data.timeframe} | ` +
-
       `${data.signal.type} | ` +
-
       `${formatPrice(
         data.signal.price
       )} | ` +
-
       `RSI ${formatRSI(
         data.rsi
       )} ${data.rsiState}`
@@ -3199,7 +3129,7 @@ async function sendCRTSignal(
   ) {
 
     console.error(
-      `[CRT] Failed to send signal ${data.symbol} ${data.timeframe}:`,
+      `[CRT] Discord signal error:`,
       error
     );
   }
@@ -3207,7 +3137,7 @@ async function sendCRTSignal(
 
 
 // ============================================================
-// CONCURRENCY HELPER
+// CONCURRENCY
 // ============================================================
 
 async function runWithConcurrency(
@@ -3216,8 +3146,12 @@ async function runWithConcurrency(
   worker
 ) {
 
-  const results =
-    [];
+  if (
+    !items.length
+  ) {
+
+    return;
+  }
 
 
   let nextIndex =
@@ -3243,37 +3177,28 @@ async function runWithConcurrency(
       }
 
 
-      const item =
-        items[
-          index
-        ];
-
-
       try {
 
-        results[
-          index
-        ] =
-          await worker(
-            item
-          );
+        await worker(
+          items[
+            index
+          ]
+        );
 
       } catch (
         error
       ) {
 
-        results[
-          index
-        ] = {
-
-          error,
-        };
+        console.error(
+          "[CRT] Worker error:",
+          error.message
+        );
       }
     }
   }
 
 
-  const workers =
+  const workerCount =
     Math.min(
       concurrency,
       items.length
@@ -3285,16 +3210,12 @@ async function runWithConcurrency(
     Array.from(
       {
         length:
-          workers,
+          workerCount,
       },
-      () =>
-        runner()
+      runner
     )
 
   );
-
-
-  return results;
 }
 
 
@@ -3305,6 +3226,15 @@ async function runWithConcurrency(
 async function scanMexc(
   client
 ) {
+
+  if (
+    Date.now() <
+    mexcBlockedUntil
+  ) {
+
+    return;
+  }
+
 
   let symbols;
 
@@ -3319,8 +3249,8 @@ async function scanMexc(
   ) {
 
     console.error(
-      "[CRT] Failed to load MEXC Futures symbols:",
-      error
+      "[CRT] MEXC Futures symbol scan failed:",
+      error.message
     );
 
 
@@ -3329,17 +3259,21 @@ async function scanMexc(
 
 
   if (
-    symbols.length ===
-    0
+    !symbols.length
   ) {
 
     console.warn(
-      "[CRT] No MEXC Futures symbols available."
+      "[CRT] No MEXC Futures symbols found."
     );
 
 
     return;
   }
+
+
+  console.log(
+    `[CRT] Scanning ${symbols.length} MEXC Futures contracts.`
+  );
 
 
   for (
@@ -3349,12 +3283,25 @@ async function scanMexc(
     )
   ) {
 
+    if (
+      Date.now() <
+      mexcBlockedUntil
+    ) {
+
+      break;
+    }
+
+
     const jobs =
       symbols.map(
-        (symbol) => ({
+        (
+          symbol
+        ) => ({
+
           symbol,
 
           timeframe,
+
         })
       );
 
@@ -3369,6 +3316,15 @@ async function scanMexc(
         job
       ) => {
 
+        if (
+          Date.now() <
+          mexcBlockedUntil
+        ) {
+
+          return;
+        }
+
+
         try {
 
           const candles =
@@ -3376,6 +3332,15 @@ async function scanMexc(
               job.symbol,
               job.timeframe
             );
+
+
+          if (
+            candles.length <
+            20
+          ) {
+
+            return;
+          }
 
 
           await processMarket(
@@ -3389,6 +3354,7 @@ async function scanMexc(
             job.timeframe,
 
             candles
+
           );
 
         } catch (
@@ -3397,9 +3363,8 @@ async function scanMexc(
 
           console.error(
 
-            `[CRT] MEXC ${job.symbol} ${job.timeframe}:`,
+            `[CRT] MEXC ${job.symbol} ${job.timeframe}: ${error.message}`
 
-            error.message
           );
         }
       }
@@ -3422,7 +3387,7 @@ async function scanOanda(
   ) {
 
     console.warn(
-      "[CRT] OANDA scan skipped: OANDA_API_KEY or OANDA_ACCOUNT_ID missing."
+      "[CRT] OANDA scan skipped: credentials missing."
     );
 
 
@@ -3443,8 +3408,8 @@ async function scanOanda(
   ) {
 
     console.error(
-      "[CRT] Failed to load OANDA instruments:",
-      error
+      "[CRT] OANDA instrument scan failed:",
+      error.message
     );
 
 
@@ -3453,18 +3418,12 @@ async function scanOanda(
 
 
   if (
-    instruments.length ===
-    0
+    !instruments.length
   ) {
 
     return;
   }
 
-
-  // ----------------------------------------------------------
-  // We scan all instruments available to the OANDA account.
-  // XAU_USD is therefore obtained from OANDA itself.
-  // ----------------------------------------------------------
 
   for (
     const timeframe
@@ -3478,9 +3437,11 @@ async function scanOanda(
         (
           instrument
         ) => ({
+
           instrument,
 
           timeframe,
+
         })
       );
 
@@ -3489,7 +3450,7 @@ async function scanOanda(
 
       jobs,
 
-      4,
+      OANDA_CONCURRENCY,
 
       async (
         job
@@ -3504,6 +3465,15 @@ async function scanOanda(
             );
 
 
+          if (
+            candles.length <
+            20
+          ) {
+
+            return;
+          }
+
+
           await processMarket(
 
             client,
@@ -3515,6 +3485,7 @@ async function scanOanda(
             job.timeframe,
 
             candles
+
           );
 
         } catch (
@@ -3523,9 +3494,8 @@ async function scanOanda(
 
           console.error(
 
-            `[CRT] OANDA ${job.instrument} ${job.timeframe}:`,
+            `[CRT] OANDA ${job.instrument} ${job.timeframe}: ${error.message}`
 
-            error.message
           );
         }
       }
@@ -3535,7 +3505,7 @@ async function scanOanda(
 
 
 // ============================================================
-// ONE FULL SCAN
+// FULL SCAN
 // ============================================================
 
 async function runFullScan(
@@ -3543,7 +3513,7 @@ async function runFullScan(
 ) {
 
   console.log(
-    "[CRT] Starting market scan..."
+    "[CRT] Starting full market scan..."
   );
 
 
@@ -3566,13 +3536,13 @@ async function runFullScan(
 
 
   console.log(
-    "[CRT] Market scan completed."
+    "[CRT] Full market scan completed."
   );
 }
 
 
 // ============================================================
-// CRT MONITOR
+// START MONITOR
 // ============================================================
 
 export function startCRTMonitor(
@@ -3584,7 +3554,7 @@ export function startCRTMonitor(
   ) {
 
     console.warn(
-      "[CRT] Monitor is already running."
+      "[CRT] Monitor already running."
     );
 
 
@@ -3598,7 +3568,7 @@ export function startCRTMonitor(
   ) {
 
     console.log(
-      "[CRT] CRT system is disabled."
+      "[CRT] CRT disabled."
     );
 
 
@@ -3612,7 +3582,7 @@ export function startCRTMonitor(
   ) {
 
     console.log(
-      "[CRT] Automatic CRT signals are disabled."
+      "[CRT] CRT auto alerts disabled."
     );
 
 
@@ -3625,7 +3595,7 @@ export function startCRTMonitor(
   ) {
 
     console.error(
-      "[CRT] Discord client is missing."
+      "[CRT] Discord client missing."
     );
 
 
@@ -3648,51 +3618,56 @@ export function startCRTMonitor(
 
 
   console.log(
-    `[CRT] Timezone: ${CRT_TIMEZONE}`
+    `[CRT] MEXC Futures API: ${MEXC_BASE_URL}`
   );
 
 
   console.log(
-    `[CRT] Timeframes: ${
-      Object.keys(
-        TIMEFRAMES
-      ).join(
-        ", "
-      )
-    }`
+    "[CRT] MEXC Spot: DISABLED"
   );
 
 
   console.log(
-    "[CRT] Crypto provider: MEXC FUTURES ONLY"
+    "[CRT] OANDA: ENABLED"
   );
 
 
   console.log(
-    "[CRT] Forex/metals provider: OANDA"
+    `[CRT] Timeframes: ${Object.keys(
+      TIMEFRAMES
+    ).join(
+      ", "
+    )}`
   );
 
 
   console.log(
-    "[CRT] Rachel T filterBW: " +
-    `${FILTER_BW}`
+    "[CRT] Filtered Top: ON"
   );
 
 
   console.log(
-    "[CRT] Filtered Top: " +
-    `${FILTERED_TOP_ENABLED}`
+    "[CRT] Filtered Bottom: ON"
   );
 
 
   console.log(
-    "[CRT] Filtered Bottom: " +
-    `${FILTERED_BOTTOM_ENABLED}`
+    "[CRT] Rachel T filterBW: FALSE"
   );
 
 
   console.log(
-    `[CRT] RSI: ${RSI_PERIOD} / ${RSI_OVERBOUGHT} / ${RSI_OVERSOLD}`
+    `[CRT] RSI: ${RSI_PERIOD}`
+  );
+
+
+  console.log(
+    `[CRT] RSI Overbought: ${RSI_OVERBOUGHT}`
+  );
+
+
+  console.log(
+    `[CRT] RSI Oversold: ${RSI_OVERSOLD}`
   );
 
 
@@ -3704,14 +3679,16 @@ export function startCRTMonitor(
   // ----------------------------------------------------------
   // FIRST SCAN
   //
-  // This establishes startup baselines.
-  // No old signals are sent.
+  // Establish baseline.
+  //
   // ----------------------------------------------------------
 
   runFullScan(
     client
   ).catch(
-    (error) => {
+    (
+      error
+    ) => {
 
       console.error(
         "[CRT] Initial scan failed:",
@@ -3733,10 +3710,12 @@ export function startCRTMonitor(
         runFullScan(
           client
         ).catch(
-          (error) => {
+          (
+            error
+          ) => {
 
             console.error(
-              "[CRT] Scan failed:",
+              "[CRT] Full scan error:",
               error
             );
           }
@@ -3745,12 +3724,13 @@ export function startCRTMonitor(
       },
 
       CHECK_INTERVAL
+
     );
 }
 
 
 // ============================================================
-// STOP CRT MONITOR
+// STOP MONITOR
 // ============================================================
 
 export function stopCRTMonitor() {
@@ -3780,7 +3760,7 @@ export function stopCRTMonitor() {
 
 
 // ============================================================
-// GET ALL CRT STATUSES
+// ALL CRT STATUS
 // ============================================================
 
 export function getAllCRTStatuses() {
@@ -3810,11 +3790,7 @@ export function getAllCRTStatuses() {
 
 
 // ============================================================
-// MANUAL FRACTAL TEST
-// ============================================================
-//
-// Useful for debugging.
-//
+// TEST RACHEL FRACTAL
 // ============================================================
 
 export function testRachelFractal(
@@ -3838,18 +3814,24 @@ export function testRachelFractal(
 
 
 // ============================================================
-// SERVICE INFORMATION
+// SERVICE INFO
 // ============================================================
 
 export function getCRTServiceInfo() {
 
   return {
 
-    providerCrypto:
+    cryptoProvider:
       "MEXC FUTURES",
 
-    providerForex:
+    forexProvider:
       "OANDA",
+
+    mexcApi:
+      MEXC_BASE_URL,
+
+    spot:
+      false,
 
     timeframes:
       Object.keys(
@@ -3874,17 +3856,17 @@ export function getCRTServiceInfo() {
     rsiOversold:
       RSI_OVERSOLD,
 
-    checkInterval:
-      CHECK_INTERVAL,
-
     timezone:
       CRT_TIMEZONE,
+
+    checkInterval:
+      CHECK_INTERVAL,
   };
 }
 
 
 // ============================================================
-// STARTUP LOG
+// STARTUP
 // ============================================================
 
 console.log(
@@ -3893,7 +3875,12 @@ console.log(
 
 
 console.log(
-  "[CRT] Rachel T Filtered Top/Bottom logic enabled."
+  "[CRT] MEXC Futures API domain:"
+);
+
+
+console.log(
+  MEXC_BASE_URL
 );
 
 
@@ -3903,10 +3890,10 @@ console.log(
 
 
 console.log(
-  "[CRT] MEXC Futures enabled."
+  "[CRT] Rachel T Filtered Top enabled."
 );
 
 
 console.log(
-  "[CRT] OANDA enabled for Forex/Metals."
+  "[CRT] Rachel T Filtered Bottom enabled."
 );
