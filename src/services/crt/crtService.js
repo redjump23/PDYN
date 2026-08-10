@@ -5,33 +5,45 @@ import botConfig from "../../config/bot.js";
 // PDYN CRT SIGNAL SERVICE
 // ============================================================
 //
-// SOURCE:
-//   MEXC FUTURES ONLY
+// DATA SOURCE
 //
-// CRT LOGIC:
-//   Rachel T Fractals
+// MEXC FUTURES ONLY
 //
-// ENABLED:
-//   Filtered Top Fractals
-//   Filtered Bottom Fractals
+// CRT LOGIC
 //
-// RSI:
-//   Display status only
-//   OVERBOUGHT / OVERSOLD / NEUTRAL
+// Rachel T Fractals
 //
-// OUTPUT:
-//   CRT SIGNAL : **COIN**
-//   SOURCE : MEXC;
-//   TIMEFRAME : 5M;
-//   CRT : BUY;
-//   RSI : NEUTRAL;
-//   VOLUME : **398.68K**;
-//   CANDLE : 08/10/2026, 09:30;
+// ENABLED
 //
-// IMPORTANT:
-//   Only COIN and VOLUME are bold.
-//   No RSI numbers are displayed.
-//   MEXC is the only output source.
+// Filtered Top Fractals
+// Filtered Bottom Fractals
+//
+// RSI
+//
+// 14
+//
+// OUTPUT
+//
+// CRT SIGNAL : **COIN**
+// SOURCE     : MEXC
+// TIMEFRAME  : 5M
+// CRT        : BUY / SELL
+// RSI        : OVERBOUGHT / OVERSOLD / NEUTRAL
+// VOLUME     : **VOLUME**
+// CANDLE     : DATE / TIME
+//
+// IMPORTANT
+//
+// Discord embeds automatically resize for:
+// - Desktop
+// - Maximized Discord
+// - Minimized Discord
+// - Mobile
+// - Vertical Discord
+//
+// To keep the layout responsive, every item is displayed
+// as a separate non-inline field.
+//
 // ============================================================
 
 
@@ -123,7 +135,7 @@ const RSI_OVERSOLD =
 
 
 // ============================================================
-// RACHEL T FRACTAL SETTINGS
+// RACHEL T FILTER SETTINGS
 // ============================================================
 
 const FILTER_BW =
@@ -187,7 +199,7 @@ const MEXC_SYMBOL_CACHE_TIME =
 
 
 // ============================================================
-// SIGNAL STATE
+// STATE
 // ============================================================
 
 const signalState =
@@ -401,7 +413,7 @@ export function isValidCRTTimeframe(
 
 
 // ============================================================
-// AVAILABLE TIMEFRAMES
+// GET AVAILABLE TIMEFRAMES
 // ============================================================
 
 export function getAvailableCRTTimeframes() {
@@ -1083,12 +1095,7 @@ async function getMexcFuturesSymbols() {
 
 
       console.error(
-        `[CRT] MEXC access denied (${error.status}).`
-      );
-
-
-      console.error(
-        "[CRT] MEXC requests paused for 60 seconds."
+        `[CRT] MEXC access denied (${error.status}). Pausing MEXC requests for 60 seconds.`
       );
     }
 
@@ -1099,7 +1106,7 @@ async function getMexcFuturesSymbols() {
 
 
 // ============================================================
-// MEXC CANDLES
+// MEXC KLINE
 // ============================================================
 
 async function fetchMexcCandles(
@@ -1181,11 +1188,6 @@ async function fetchMexcCandles(
       );
 
 
-      console.error(
-        `[CRT] URL: ${url}`
-      );
-
-
       return [];
     }
 
@@ -1236,7 +1238,7 @@ function parseMexcKlineResponse(
 
 
   // ----------------------------------------------------------
-  // FORMAT 1
+  // OBJECT FORMAT
   // ----------------------------------------------------------
 
   if (
@@ -1333,7 +1335,7 @@ function parseMexcKlineResponse(
 
 
   // ----------------------------------------------------------
-  // FORMAT 2
+  // ARRAY FORMAT
   // ----------------------------------------------------------
 
   if (
@@ -1693,7 +1695,7 @@ export function calculateRSI(
 
 
 // ============================================================
-// RSI STATE
+// RSI STATUS
 // ============================================================
 
 function getRSIState(
@@ -1733,7 +1735,7 @@ function getRSIState(
 
 
 // ============================================================
-// RACHEL T BW TOP FRACTAL
+// RACHEL T — BW TOP FRACTAL
 // ============================================================
 
 function isBWTop(
@@ -1801,7 +1803,7 @@ function isBWTop(
 
 
 // ============================================================
-// RACHEL T BW BOTTOM FRACTAL
+// RACHEL T — BW BOTTOM FRACTAL
 // ============================================================
 
 function isBWBottom(
@@ -1917,7 +1919,7 @@ function isFilteredBottom(
 
 
 // ============================================================
-// FIND LAST FILTERED FRACTAL
+// FIND LAST FRACTAL
 // ============================================================
 
 function findLastFilteredFractal(
@@ -2164,7 +2166,6 @@ function findNewestFractalAfter(
 
 async function processMarket(
   client,
-  provider,
   symbol,
   timeframe,
   candles
@@ -2196,7 +2197,7 @@ async function processMarket(
 
 
   const stateKey =
-    `${provider}|${symbol}|${timeframe}`;
+    `MEXC|${symbol}|${timeframe}`;
 
 
   const previousTimestamp =
@@ -2259,7 +2260,7 @@ async function processMarket(
 
 
     console.log(
-      `[CRT] Baseline | ${provider} | ${symbol} | ${timeframe} | ${signal.fractalType}`
+      `[CRT] Baseline | MEXC | ${symbol} | ${timeframe} | ${signal.fractalType}`
     );
 
 
@@ -2302,8 +2303,8 @@ async function processMarket(
   await sendCRTSignal(
     client,
     {
-
-      provider,
+      provider:
+        "MEXC",
 
       symbol,
 
@@ -2401,9 +2402,7 @@ function formatVolume(
 
   if (
     !Number.isFinite(
-      Number(
-        volume
-      )
+      volume
     )
   ) {
 
@@ -2411,22 +2410,20 @@ function formatVolume(
   }
 
 
-  const value =
-    Number(
+  const absolute =
+    Math.abs(
       volume
     );
 
 
   if (
-    Math.abs(
-      value
-    ) >=
+    absolute >=
     1_000_000_000
   ) {
 
     return (
       (
-        value /
+        volume /
         1_000_000_000
       ).toFixed(
         2
@@ -2437,15 +2434,13 @@ function formatVolume(
 
 
   if (
-    Math.abs(
-      value
-    ) >=
+    absolute >=
     1_000_000
   ) {
 
     return (
       (
-        value /
+        volume /
         1_000_000
       ).toFixed(
         2
@@ -2456,15 +2451,13 @@ function formatVolume(
 
 
   if (
-    Math.abs(
-      value
-    ) >=
+    absolute >=
     1_000
   ) {
 
     return (
       (
-        value /
+        volume /
         1_000
       ).toFixed(
         2
@@ -2474,12 +2467,32 @@ function formatVolume(
   }
 
 
-  return value.toLocaleString(
-    "en-US",
-    {
-      maximumFractionDigits:
-        2,
-    }
+  return volume.toFixed(
+    2
+  );
+}
+
+
+// ============================================================
+// FORMAT RSI
+// ============================================================
+
+function formatRSI(
+  rsi
+) {
+
+  if (
+    !Number.isFinite(
+      rsi
+    )
+  ) {
+
+    return "N/A";
+  }
+
+
+  return rsi.toFixed(
+    2
   );
 }
 
@@ -2525,18 +2538,48 @@ function formatSignalTime(
 
 
 // ============================================================
+// RSI DISPLAY
+// ============================================================
+//
+// OVERBOUGHT = BOLD
+// OVERSOLD   = BOLD
+// NEUTRAL    = NORMAL
+//
+// ============================================================
+
+function formatRSIState(
+  rsiState
+) {
+
+  if (
+    rsiState ===
+      "OVERBOUGHT" ||
+    rsiState ===
+      "OVERSOLD"
+  ) {
+
+    return `**${rsiState}**`;
+  }
+
+
+  return rsiState;
+}
+
+
+// ============================================================
 // CREATE DISCORD EMBED
 // ============================================================
 //
-// IMPORTANT:
+// RESPONSIVE DESIGN
 //
-// Only:
-//   COIN
-//   VOLUME
+// Every field is inline:false.
 //
-// are bold.
-//
-// All other values are normal.
+// This makes the embed automatically adapt to:
+// - Desktop
+// - Mobile
+// - Narrow Discord windows
+// - Vertical Discord
+// - Minimized Discord
 //
 // ============================================================
 
@@ -2553,6 +2596,8 @@ function createSignalEmbed(
     timeframe,
 
     signal,
+
+    rsi,
 
     rsiState,
 
@@ -2579,45 +2624,183 @@ function createSignalEmbed(
         );
 
 
-  const volume =
-    formatVolume(
+  // ----------------------------------------------------------
+  // DISPLAY VALUES
+  // ----------------------------------------------------------
+
+  const displaySymbol =
+    `**\`${symbol}\`**`;
+
+
+  const displaySource =
+    `\`${provider}\``;
+
+
+  const displayTimeframe =
+    `\`${timeframe.toUpperCase()}\``;
+
+
+  const displayCRT =
+    `\`${signal.type}\``;
+
+
+  const displayRSI =
+    `\`${formatRSIState(
+      rsiState
+    )}\``;
+
+
+  const displayVolume =
+    `**\`${formatVolume(
       signal.volume
-    );
+    )}\`**`;
 
 
-  const description =
-
-    `CRT SIGNAL : **${symbol}**\n` +
-
-    `SOURCE : ${provider};\n` +
-
-    `TIMEFRAME : ${timeframe.toUpperCase()};\n` +
-
-    `CRT : ${signal.type};\n` +
-
-    `RSI : ${rsiState};\n` +
-
-    `VOLUME : **${volume}**;\n` +
-
-    `CANDLE : ${formatSignalTime(
+  const displayCandle =
+    `\`${formatSignalTime(
       signal.timestamp
-    )};`;
+    )}\``;
 
+
+  // ----------------------------------------------------------
+  // EMBED
+  // ----------------------------------------------------------
 
   return new EmbedBuilder()
 
-    .setDescription(
-      description
+    .setTitle(
+      "CRT SIGNAL"
     )
+
+    // --------------------------------------------------------
+    // CRT SIGNAL / COIN
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "CRT SIGNAL",
+
+      value:
+        displaySymbol,
+
+      inline:
+        false,
+
+    })
+
+    // --------------------------------------------------------
+    // SOURCE
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "SOURCE",
+
+      value:
+        `${displaySource};`,
+
+      inline:
+        false,
+
+    })
+
+    // --------------------------------------------------------
+    // TIMEFRAME
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "TIMEFRAME",
+
+      value:
+        `${displayTimeframe};`,
+
+      inline:
+        false,
+
+    })
+
+    // --------------------------------------------------------
+    // CRT
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "CRT",
+
+      value:
+        `${displayCRT};`,
+
+      inline:
+        false,
+
+    })
+
+    // --------------------------------------------------------
+    // RSI
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "RSI",
+
+      value:
+        `${displayRSI};`,
+
+      inline:
+        false,
+
+    })
+
+    // --------------------------------------------------------
+    // VOLUME
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "VOLUME",
+
+      value:
+        `${displayVolume};`,
+
+      inline:
+        false,
+
+    })
+
+    // --------------------------------------------------------
+    // CANDLE
+    // --------------------------------------------------------
+
+    .addFields({
+
+      name:
+        "CANDLE",
+
+      value:
+        `${displayCandle};`,
+
+      inline:
+        false,
+
+    })
 
     .setColor(
       color
     )
 
     .setFooter({
+
       text:
         CRT_CONFIG.footer ||
         "CRT • PDYN",
+
     })
 
     .setTimestamp(
@@ -2696,14 +2879,16 @@ async function sendCRTSignal(
 
     console.log(
       `[CRT] SIGNAL SENT | ` +
-      `${data.provider} | ` +
+      `MEXC | ` +
       `${data.symbol} | ` +
       `${data.timeframe} | ` +
       `${data.signal.type} | ` +
-      `Volume ${formatVolume(
+      `RSI ${formatRSI(
+        data.rsi
+      )} ${data.rsiState} | ` +
+      `VOL ${formatVolume(
         data.signal.volume
-      )} | ` +
-      `RSI ${data.rsiState}`
+      )}`
     );
 
   } catch (
@@ -2929,8 +3114,6 @@ async function scanMexc(
 
             client,
 
-            "MEXC",
-
             job.symbol,
 
             job.timeframe,
@@ -2950,6 +3133,7 @@ async function scanMexc(
           );
         }
       }
+
     );
   }
 }
@@ -2964,7 +3148,7 @@ async function runFullScan(
 ) {
 
   console.log(
-    "[CRT] Starting full MEXC market scan..."
+    "[CRT] Starting MEXC full market scan..."
   );
 
 
@@ -2974,7 +3158,7 @@ async function runFullScan(
 
 
   console.log(
-    "[CRT] Full MEXC market scan completed."
+    "[CRT] MEXC full market scan completed."
   );
 }
 
@@ -3061,7 +3245,12 @@ export function startCRTMonitor(
 
 
   console.log(
-    "[CRT] Source: MEXC ONLY"
+    "[CRT] Source: MEXC"
+  );
+
+
+  console.log(
+    "[CRT] OANDA: DISABLED"
   );
 
 
@@ -3080,12 +3269,12 @@ export function startCRTMonitor(
 
 
   console.log(
-    "[CRT] Rachel T Filtered Top: ON"
+    "[CRT] Filtered Top: ON"
   );
 
 
   console.log(
-    "[CRT] Rachel T Filtered Bottom: ON"
+    "[CRT] Filtered Bottom: ON"
   );
 
 
@@ -3115,7 +3304,7 @@ export function startCRTMonitor(
 
 
   console.log(
-    "[CRT] Output formatting: Coin + Volume bold only"
+    "[CRT] Responsive Discord layout: ENABLED"
   );
 
 
@@ -3124,9 +3313,9 @@ export function startCRTMonitor(
   );
 
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // FIRST SCAN
-  // ==========================================================
+  // ----------------------------------------------------------
 
   runFullScan(
     client
@@ -3143,9 +3332,9 @@ export function startCRTMonitor(
   );
 
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // CONTINUOUS SCAN
-  // ==========================================================
+  // ----------------------------------------------------------
 
   monitorTimer =
     setInterval(
@@ -3272,13 +3461,16 @@ export function getCRTServiceInfo() {
     forexProvider:
       "MEXC FUTURES",
 
-    source:
-      "MEXC",
-
     mexcApi:
       MEXC_BASE_URL,
 
+    source:
+      "MEXC",
+
     spot:
+      false,
+
+    oanda:
       false,
 
     timeframes:
@@ -3327,22 +3519,17 @@ console.log(
 
 
 console.log(
-  "[CRT] Source: MEXC Futures ONLY."
-);
-
-
-console.log(
-  "[CRT] MEXC Futures API domain:"
-);
-
-
-console.log(
-  MEXC_BASE_URL
+  "[CRT] Source: MEXC Futures."
 );
 
 
 console.log(
   "[CRT] MEXC Spot disabled."
+);
+
+
+console.log(
+  "[CRT] OANDA disabled."
 );
 
 
@@ -3362,5 +3549,5 @@ console.log(
 
 
 console.log(
-  "[CRT] Only coin and volume are bold."
+  "[CRT] Responsive Discord embed enabled."
 );
