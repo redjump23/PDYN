@@ -1,4 +1,3 @@
-```javascript
 import { EmbedBuilder } from 'discord.js';
 import botConfig from '../../config/bot.js';
 import { buildSignal } from './crtEngine.js';
@@ -1106,4 +1105,4 @@ export function getCRTConfig() {
 console.log(
   `[CRT] Service loaded • ${Object.keys(TIMEFRAMES).join(', ')}`
 );
-```
+
