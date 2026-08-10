@@ -44,6 +44,7 @@
 //
 // ============================================================
 
+
 // ============================================================
 // TIMEFRAMES
 // ============================================================
@@ -55,11 +56,13 @@ const TOP_DOWN_TIMEFRAMES = [
   "15m",
 ];
 
+
 // ============================================================
 // LOWER TIMEFRAME
 // ============================================================
 
 const LOWER_TIMEFRAME = "5m";
+
 
 // ============================================================
 // ALL TIMEFRAMES
@@ -69,6 +72,7 @@ const ALL_TIMEFRAMES = [
   ...TOP_DOWN_TIMEFRAMES,
   LOWER_TIMEFRAME,
 ];
+
 
 // ============================================================
 // PERSISTENT STATE
@@ -86,9 +90,15 @@ const ALL_TIMEFRAMES = [
 //   1h  -> SELL
 //   15m -> BUY
 //
+// IMPORTANT:
+//
+// This state persists for the lifetime of the Node.js process.
+// It is intentionally NOT cleared during normal scanning.
+//
 // ============================================================
 
 const topDownState = new Map();
+
 
 // ============================================================
 // NORMALIZE SYMBOL
@@ -100,6 +110,7 @@ function normalizeSymbol(symbol) {
     .toUpperCase();
 }
 
+
 // ============================================================
 // NORMALIZE TIMEFRAME
 // ============================================================
@@ -109,6 +120,7 @@ function normalizeTimeframe(timeframe) {
     .trim()
     .toLowerCase();
 }
+
 
 // ============================================================
 // CHECK HTF
@@ -120,6 +132,7 @@ export function isTopDownTimeframe(timeframe) {
   );
 }
 
+
 // ============================================================
 // CHECK SUPPORTED TIMEFRAME
 // ============================================================
@@ -129,6 +142,7 @@ function isSupportedTimeframe(timeframe) {
     normalizeTimeframe(timeframe)
   );
 }
+
 
 // ============================================================
 // GET SYMBOL STATE
@@ -153,6 +167,7 @@ function getSymbolState(symbol) {
     normalizedSymbol
   );
 }
+
 
 // ============================================================
 // NORMALIZE SIGNAL
@@ -219,11 +234,11 @@ function normalizeSignal(
   const fractalType =
     String(
       signal.fractalType ||
-        (
-          type === "BUY"
-            ? "BOTTOM"
-            : "TOP"
-        )
+      (
+        type === "BUY"
+          ? "BOTTOM"
+          : "TOP"
+      )
     )
       .trim()
       .toUpperCase();
@@ -269,6 +284,7 @@ function normalizeSignal(
       Date.now(),
   };
 }
+
 
 // ============================================================
 // STORE CRT
@@ -326,6 +342,7 @@ export function updateTopDownCRT(
       normalizedTimeframe
     );
 
+
   // ----------------------------------------------------------
   // FIRST CONFIRMED FRACTAL
   // ----------------------------------------------------------
@@ -345,6 +362,7 @@ export function updateTopDownCRT(
     return true;
   }
 
+
   // ----------------------------------------------------------
   // OLD OR SAME FRACTAL
   // ----------------------------------------------------------
@@ -355,6 +373,7 @@ export function updateTopDownCRT(
   ) {
     return false;
   }
+
 
   // ----------------------------------------------------------
   // NEWER FRACTAL
@@ -373,6 +392,7 @@ export function updateTopDownCRT(
 
   return true;
 }
+
 
 // ============================================================
 // GET STORED CRT
@@ -413,6 +433,7 @@ export function getTopDownCRT(
     null
   );
 }
+
 
 // ============================================================
 // GET ALL STORED HTF CRT
@@ -459,6 +480,7 @@ export function getStoredTopDownState(
   return result;
 }
 
+
 // ============================================================
 // CREATE EMPTY STATE
 // ============================================================
@@ -472,6 +494,7 @@ export function createEmptyTopDownState() {
   };
 }
 
+
 // ============================================================
 // GET TOP-DOWN TIMEFRAMES
 // ============================================================
@@ -481,6 +504,7 @@ export function getTopDownTimeframes() {
     ...TOP_DOWN_TIMEFRAMES,
   ];
 }
+
 
 // ============================================================
 // COUNT CONFIRMED HTF CRT
@@ -509,6 +533,7 @@ export function countTopDownConfirmed(
   return count;
 }
 
+
 // ============================================================
 // FORMAT TOP-DOWN COUNT
 // ============================================================
@@ -523,6 +548,7 @@ export function formatTopDownCount(
 
   return `${count}/4 CONFIRMED`;
 }
+
 
 // ============================================================
 // FORMAT SINGLE CRT
@@ -539,6 +565,7 @@ function formatSingleCRT(
     ? "BUY"
     : "SELL";
 }
+
 
 // ============================================================
 // FORMAT HTF CRT
@@ -583,6 +610,7 @@ export function formatHTFCRT(
   );
 }
 
+
 // ============================================================
 // FORMAT HTF CRT DETAILS
 // ============================================================
@@ -600,6 +628,7 @@ export function formatHTFCRTDetails(
     topDown
   );
 }
+
 
 // ============================================================
 // BUILD TOP-DOWN CHAIN
@@ -656,6 +685,7 @@ export function buildTopDownChain(
       TOP_DOWN_TIMEFRAMES.length,
   };
 }
+
 
 // ============================================================
 // ANALYZE TOP-DOWN
@@ -734,6 +764,7 @@ export function analyzeTopDown(
   };
 }
 
+
 // ============================================================
 // FORMAT TOP-DOWN DISPLAY
 // ============================================================
@@ -754,8 +785,8 @@ export function formatTopDownDisplay(
   const confirmed =
     Number(
       topDown.confirmedCount ??
-        topDown.confirmed ??
-        0
+      topDown.confirmed ??
+      0
     );
 
   const daily =
@@ -792,6 +823,7 @@ export function formatTopDownDisplay(
     "\n"
   );
 }
+
 
 // ============================================================
 // GET TOP-DOWN SUMMARY
@@ -838,6 +870,7 @@ export function getTopDownSummary(
   };
 }
 
+
 // ============================================================
 // CLEAR ONE SYMBOL
 // ============================================================
@@ -861,6 +894,7 @@ export function clearTopDownSymbol(
     normalizedSymbol
   );
 }
+
 
 // ============================================================
 // CLEAR ONE TIMEFRAME
@@ -910,6 +944,7 @@ export function clearTopDownTimeframe(
   return deleted;
 }
 
+
 // ============================================================
 // CLEAR EVERYTHING
 // ============================================================
@@ -924,6 +959,7 @@ export function clearAllTopDownState() {
   topDownState.clear();
 }
 
+
 // ============================================================
 // GET STATE SIZE
 // ============================================================
@@ -931,6 +967,7 @@ export function clearAllTopDownState() {
 export function getTopDownStateSize() {
   return topDownState.size;
 }
+
 
 // ============================================================
 // GET ALL SYMBOLS
@@ -941,6 +978,7 @@ export function getTopDownSymbols() {
     ...topDownState.keys(),
   ];
 }
+
 
 // ============================================================
 // DEBUG STATE
@@ -999,6 +1037,7 @@ export function getTopDownDebugState() {
   return result;
 }
 
+
 // ============================================================
 // EXPORT CONSTANTS
 // ============================================================
@@ -1008,6 +1047,7 @@ export {
   LOWER_TIMEFRAME,
   ALL_TIMEFRAMES,
 };
+
 
 // ============================================================
 // SERVICE STARTUP
@@ -1038,4 +1078,3 @@ console.log(
 console.log(
   "[TOPDOWN] Rachel T fractal only: ENABLED"
 );
-```
