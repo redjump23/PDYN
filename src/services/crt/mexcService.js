@@ -26,6 +26,24 @@
 // 30m remains supported here for compatibility with other
 // services, but CRT top-down does NOT use 30m.
 //
+// IMPORTANT:
+//
+// MEXC Futures API:
+//
+//   Base URL:
+//     https://api.mexc.com
+//
+//   Kline endpoint:
+//
+//     /api/v1/contract/kline/{symbol}
+//
+//   Parameters:
+//
+//     interval
+//     start
+//     end
+//
+// The Futures API uses UNIX timestamps in SECONDS.
 // ============================================================
 
 // ============================================================
@@ -35,13 +53,19 @@
 const SPOT_BASE_URL = (
   process.env.MEXC_SPOT_BASE_URL ||
   "https://api.mexc.com"
-).replace(/\/+$/, "");
+).replace(
+  /\/+$/,
+  ""
+);
 
 const FUTURES_BASE_URL = (
   process.env.MEXC_FUTURES_BASE_URL ||
   process.env.MEXC_FUTURES_API_URL ||
   "https://api.mexc.com"
-).replace(/\/+$/, "");
+).replace(
+  /\/+$/,
+  ""
+);
 
 // ============================================================
 // TIMEFRAMES
@@ -51,31 +75,43 @@ const INTERVALS = {
   "5m": {
     spot: "5m",
     futures: "Min5",
+    milliseconds:
+      5 * 60 * 1000,
   },
 
   "15m": {
     spot: "15m",
     futures: "Min15",
+    milliseconds:
+      15 * 60 * 1000,
   },
 
   "30m": {
     spot: "30m",
     futures: "Min30",
+    milliseconds:
+      30 * 60 * 1000,
   },
 
   "1h": {
     spot: "60m",
     futures: "Min60",
+    milliseconds:
+      60 * 60 * 1000,
   },
 
   "4h": {
     spot: "4h",
     futures: "Hour4",
+    milliseconds:
+      4 * 60 * 60 * 1000,
   },
 
   "1d": {
     spot: "1d",
     futures: "Day1",
+    milliseconds:
+      24 * 60 * 60 * 1000,
   },
 };
 
@@ -83,8 +119,14 @@ const INTERVALS = {
 // ASSERT TIMEFRAME
 // ============================================================
 
-function assertTimeframe(timeframe) {
-  if (!INTERVALS[timeframe]) {
+function assertTimeframe(
+  timeframe
+) {
+  if (
+    !INTERVALS[
+      timeframe
+    ]
+  ) {
     throw new Error(
       `Unsupported MEXC timeframe: ${timeframe}`
     );
@@ -128,7 +170,8 @@ async function requestJson(
             "User-Agent":
               "PDYN-MEXC-Service/1.0",
 
-            ...(options.headers || {}),
+            ...(options.headers ||
+              {}),
           },
         }
       );
@@ -141,7 +184,9 @@ async function requestJson(
     try {
       data =
         text
-          ? JSON.parse(text)
+          ? JSON.parse(
+              text
+            )
           : null;
     } catch {
       throw new Error(
@@ -149,7 +194,9 @@ async function requestJson(
       );
     }
 
-    if (!response.ok) {
+    if (
+      !response.ok
+    ) {
       throw new Error(
         `MEXC HTTP ${response.status}: ${JSON.stringify(
           data
@@ -158,8 +205,11 @@ async function requestJson(
     }
 
     return data;
+
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(
+      timeout
+    );
   }
 }
 
@@ -167,57 +217,79 @@ async function requestJson(
 // NORMALIZE SPOT KLINES
 // ============================================================
 
-function normalizeSpotKlines(rows) {
-  if (!Array.isArray(rows)) {
+function normalizeSpotKlines(
+  rows
+) {
+  if (
+    !Array.isArray(
+      rows
+    )
+  ) {
     return [];
   }
 
   return rows
-    .map((row) => {
-      const openTime =
-        Number(row?.[0]);
+    .map(
+      (row) => {
+        const openTime =
+          Number(
+            row?.[0]
+          );
 
-      const open =
-        Number(row?.[1]);
+        const open =
+          Number(
+            row?.[1]
+          );
 
-      const high =
-        Number(row?.[2]);
+        const high =
+          Number(
+            row?.[2]
+          );
 
-      const low =
-        Number(row?.[3]);
+        const low =
+          Number(
+            row?.[3]
+          );
 
-      const close =
-        Number(row?.[4]);
+        const close =
+          Number(
+            row?.[4]
+          );
 
-      const volume =
-        Number(row?.[5] || 0);
+        const volume =
+          Number(
+            row?.[5] || 0
+          );
 
-      const closeTime =
-        Number(row?.[6]);
+        const closeTime =
+          Number(
+            row?.[6]
+          );
 
-      return {
-        openTime,
-
-        timestamp:
+        return {
           openTime,
 
-        open,
-        high,
-        low,
-        close,
-        volume,
+          timestamp:
+            openTime,
 
-        closeTime,
+          open,
+          high,
+          low,
+          close,
+          volume,
 
-        closed:
-          Number.isFinite(
-            closeTime
-          )
-            ? closeTime <=
-              Date.now()
-            : true,
-      };
-    })
+          closeTime,
+
+          closed:
+            Number.isFinite(
+              closeTime
+            )
+              ? closeTime <=
+                Date.now()
+              : true,
+        };
+      }
+    )
     .filter(
       (candle) =>
         Number.isFinite(
@@ -235,6 +307,11 @@ function normalizeSpotKlines(rows) {
         Number.isFinite(
           candle.close
         )
+    )
+    .sort(
+      (a, b) =>
+        a.timestamp -
+        b.timestamp
     );
 }
 
@@ -247,78 +324,68 @@ function normalizeFuturesKlines(
   timeframe
 ) {
   const times =
-    Array.isArray(data?.time)
+    Array.isArray(
+      data?.time
+    )
       ? data.time
       : [];
 
   const opens =
-    Array.isArray(data?.open)
+    Array.isArray(
+      data?.open
+    )
       ? data.open
       : [];
 
   const highs =
-    Array.isArray(data?.high)
+    Array.isArray(
+      data?.high
+    )
       ? data.high
       : [];
 
   const lows =
-    Array.isArray(data?.low)
+    Array.isArray(
+      data?.low
+    )
       ? data.low
       : [];
 
   const closes =
-    Array.isArray(data?.close)
+    Array.isArray(
+      data?.close
+    )
       ? data.close
       : [];
 
   const volumes =
-    Array.isArray(data?.vol)
+    Array.isArray(
+      data?.vol
+    )
       ? data.vol
       : [];
 
-  const intervalMs = {
-    "5m":
-      5 *
-      60 *
-      1000,
+  const intervalMs =
+    INTERVALS[
+      timeframe
+    ]?.milliseconds;
 
-    "15m":
-      15 *
-      60 *
-      1000,
-
-    "30m":
-      30 *
-      60 *
-      1000,
-
-    "1h":
-      60 *
-      60 *
-      1000,
-
-    "4h":
-      4 *
-      60 *
-      60 *
-      1000,
-
-    "1d":
-      24 *
-      60 *
-      60 *
-      1000,
-  }[timeframe];
-
-  if (!intervalMs) {
+  if (
+    !intervalMs
+  ) {
     return [];
   }
 
   return times
     .map(
-      (time, index) => {
+      (
+        time,
+        index
+      ) => {
         const openTime =
-          Number(time) *
+          Number(
+            time
+          ) *
           1000;
 
         const closeTime =
@@ -354,7 +421,8 @@ function normalizeFuturesKlines(
 
           volume:
             Number(
-              volumes[index] || 0
+              volumes[index] ||
+                0
             ),
 
           closeTime,
@@ -382,6 +450,11 @@ function normalizeFuturesKlines(
         Number.isFinite(
           candle.close
         )
+    )
+    .sort(
+      (a, b) =>
+        a.timestamp -
+        b.timestamp
     );
 }
 
@@ -401,18 +474,24 @@ export async function getSpotKlines(
   const safeLimit =
     Math.min(
       Math.max(
-        Number(limit) || 100,
+        Number(
+          limit
+        ) || 100,
         1
       ),
       1000
     );
 
   const normalizedSymbol =
-    String(symbol || "")
+    String(
+      symbol || ""
+    )
       .trim()
       .toUpperCase();
 
-  if (!normalizedSymbol) {
+  if (
+    !normalizedSymbol
+  ) {
     throw new Error(
       "MEXC spot symbol is required."
     );
@@ -429,7 +508,9 @@ export async function getSpotKlines(
         ].spot,
 
       limit:
-        String(safeLimit),
+        String(
+          safeLimit
+        ),
     });
 
   const data =
@@ -437,7 +518,11 @@ export async function getSpotKlines(
       `${SPOT_BASE_URL}/api/v3/klines?${params}`
     );
 
-  if (!Array.isArray(data)) {
+  if (
+    !Array.isArray(
+      data
+    )
+  ) {
     throw new Error(
       `Unexpected spot kline response for ${symbol}`
     );
@@ -450,6 +535,19 @@ export async function getSpotKlines(
 
 // ============================================================
 // GET FUTURES KLINES
+// ============================================================
+//
+// IMPORTANT:
+//
+// Do NOT send "limit" to the Futures endpoint.
+//
+// MEXC Futures uses:
+//
+//   start
+//   end
+//
+// Both are UNIX timestamps in seconds.
+//
 // ============================================================
 
 export async function getFuturesKlines(
@@ -464,42 +562,86 @@ export async function getFuturesKlines(
   const safeLimit =
     Math.min(
       Math.max(
-        Number(limit) || 100,
-        1
+        Number(
+          limit
+        ) || 100,
+        5
       ),
-      1000
+      2000
     );
+
+  const normalizedSymbol =
+    String(
+      symbol || ""
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    !normalizedSymbol
+  ) {
+    throw new Error(
+      "MEXC futures symbol is required."
+    );
+  }
 
   const interval =
     INTERVALS[
       timeframe
     ].futures;
 
-  const normalizedSymbol =
-    String(symbol || "")
-      .trim()
-      .toUpperCase();
-
-  if (!normalizedSymbol) {
-    throw new Error(
-      "MEXC futures symbol is required."
+  const intervalSeconds =
+    Math.floor(
+      INTERVALS[
+        timeframe
+      ].milliseconds /
+      1000
     );
-  }
+
+  const nowSeconds =
+    Math.floor(
+      Date.now() /
+      1000
+    );
+
+  const endSeconds =
+    nowSeconds;
+
+  const startSeconds =
+    Math.max(
+      0,
+      endSeconds -
+        (
+          safeLimit *
+          intervalSeconds
+        )
+    );
 
   const params =
     new URLSearchParams({
       interval,
 
-      limit:
-        String(safeLimit),
+      start:
+        String(
+          startSeconds
+        ),
+
+      end:
+        String(
+          endSeconds
+        ),
     });
+
+  const url =
+    `${FUTURES_BASE_URL}` +
+    `/api/v1/contract/kline/` +
+    `${encodeURIComponent(
+      normalizedSymbol
+    )}?${params}`;
 
   const data =
     await requestJson(
-      `${FUTURES_BASE_URL}/api/v1/contract/kline/` +
-      `${encodeURIComponent(
-        normalizedSymbol
-      )}?${params}`
+      url
     );
 
   if (
@@ -511,10 +653,30 @@ export async function getFuturesKlines(
     );
   }
 
-  return normalizeFuturesKlines(
-    data.data,
-    timeframe
-  );
+  const candles =
+    normalizeFuturesKlines(
+      data.data,
+      timeframe
+    );
+
+  // ----------------------------------------------------------
+  // Safety trim.
+  //
+  // If MEXC returns more candles than requested because of
+  // endpoint behavior, keep only the newest requested amount.
+  // ----------------------------------------------------------
+
+  if (
+    candles.length >
+    safeLimit
+  ) {
+    return candles.slice(
+      candles.length -
+        safeLimit
+    );
+  }
+
+  return candles;
 }
 
 // ============================================================
@@ -528,8 +690,9 @@ export async function getKlines({
   limit = 100,
 }) {
   if (
-    String(market)
-      .toLowerCase() ===
+    String(
+      market
+    ).toLowerCase() ===
     "futures"
   ) {
     return getFuturesKlines(
@@ -564,19 +727,20 @@ export async function getSpotSymbols() {
       : [];
 
   return symbols
-    .filter((item) => {
-      return (
+    .filter(
+      (item) =>
         item?.status ===
           "ENABLED" ||
         item?.isSpotTradingAllowed ===
           true
-      );
-    })
+    )
     .map(
       (item) =>
         item?.symbol
     )
-    .filter(Boolean);
+    .filter(
+      Boolean
+    );
 }
 
 // ============================================================
@@ -617,45 +781,51 @@ export async function getFuturesSymbols() {
     await getFuturesContracts();
 
   return contracts
-    .filter((contract) => {
-      const symbol =
-        String(
-          contract?.symbol ||
-            ""
-        )
-          .trim()
-          .toUpperCase();
-
-      const quote =
-        String(
-          contract?.quoteCoin ||
-            ""
-        )
-          .trim()
-          .toUpperCase();
-
-      const settle =
-        String(
-          contract?.settleCoin ||
-            ""
-        )
-          .trim()
-          .toUpperCase();
-
-      return (
-        Boolean(symbol) &&
-        (
-          quote === "USDT" ||
-          settle === "USDT" ||
-          symbol.endsWith(
-            "_USDT"
-          ) ||
-          symbol.endsWith(
-            "USDT"
+    .filter(
+      (contract) => {
+        const symbol =
+          String(
+            contract?.symbol ||
+              ""
           )
-        )
-      );
-    })
+            .trim()
+            .toUpperCase();
+
+        const quote =
+          String(
+            contract?.quoteCoin ||
+              ""
+          )
+            .trim()
+            .toUpperCase();
+
+        const settle =
+          String(
+            contract?.settleCoin ||
+              ""
+          )
+            .trim()
+            .toUpperCase();
+
+        return (
+          Boolean(
+            symbol
+          ) &&
+          (
+            quote ===
+              "USDT" ||
+            settle ===
+              "USDT" ||
+            symbol.endsWith(
+              "_USDT"
+            ) ||
+            symbol.endsWith(
+              "USDT"
+            )
+          )
+        );
+      }
+    )
     .map(
       (contract) =>
         String(
@@ -664,7 +834,9 @@ export async function getFuturesSymbols() {
           .trim()
           .toUpperCase()
     )
-    .filter(Boolean);
+    .filter(
+      Boolean
+    );
 }
 
 // ============================================================
@@ -675,21 +847,25 @@ export function getConfiguredSymbols(
   market
 ) {
   const key =
-    String(market)
-      .toLowerCase() ===
+    String(
+      market
+    ).toLowerCase() ===
     "futures"
       ? "MEXC_FUTURES_SYMBOLS"
       : "MEXC_SPOT_SYMBOLS";
 
   return String(
-    process.env[key] || ""
+    process.env[key] ||
+      ""
   )
     .split(",")
     .map(
       (symbol) =>
         symbol.trim()
     )
-    .filter(Boolean);
+    .filter(
+      Boolean
+    );
 }
 
 // ============================================================
@@ -729,6 +905,12 @@ export function getMexcServiceInfo() {
     removedCRTTimeframes: [
       "30m",
     ],
+
+    futuresKlineUsesRange:
+      true,
+
+    futuresKlineMax:
+      2000,
   };
 }
 
@@ -758,6 +940,10 @@ console.log(
 
 console.log(
   "[MEXC] CRT intervals: 1D, 4H, 1H, 15M, 5M"
+);
+
+console.log(
+  "[MEXC] Futures K-lines: start/end range mode"
 );
 
 console.log(
