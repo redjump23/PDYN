@@ -415,7 +415,7 @@ crt: {
         "MEXC FUTURES",
 
       api:
-        "https://contract.mexc.com",
+        "https://api.mexc.com",
 
       futuresOnly:
         true,
