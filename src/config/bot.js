@@ -1,1072 +1,541 @@
 import { logger } from '../utils/logger.js';
 
 export const botConfig = {
+  // =========================
+  // BOT PRESENCE
+  // =========================
+  presence: {
+    status: "idle",
 
-// ============================================================
-// BOT PRESENCE
-// ============================================================
-
-presence: {
-
-  status:
-    "idle",
-
-  activities: [
-
-    {
-      name:
-        "Custom Status",
-
-      state:
-        "BAKA DAN YAN",
-
-      type:
-        3,
-    },
-
-  ],
-
-},
-
-// ============================================================
-// COMMAND BEHAVIOR
-// ============================================================
-
-commands: {
-
-  owners:
-    process.env.OWNER_IDS
-      ?.split(",")
-      .map(
-        (id) =>
-          id.trim()
-      )
-      .filter(Boolean) ||
-    [],
-
-  defaultCooldown:
-    3,
-
-  deleteCommands:
-    false,
-
-  testGuildId:
-    process.env.TEST_GUILD_ID,
-
-  maintenanceMode:
-    process.env.MAINTENANCE_MODE ===
-    "true",
-
-  prefix:
-    process.env.PREFIX ||
-    "!",
-
-},
-
-// ============================================================
-// APPLICATIONS SYSTEM
-// ============================================================
-
-applications: {
-
-  defaultQuestions: [
-
-    {
-      question:
-        "What is your name?",
-
-      required:
-        true,
-    },
-
-    {
-      question:
-        "How old are you?",
-
-      required:
-        true,
-    },
-
-    {
-      question:
-        "Why do you want to join?",
-
-      required:
-        true,
-    },
-
-  ],
-
-  statusColors: {
-
-    pending:
-      "#FFA500",
-
-    approved:
-      "#00FF00",
-
-    denied:
-      "#FF0000",
-
+    activities: [
+      {
+        name: "Custom Status",
+        state: "SAKAMOTO #1",
+        type: 3,
+      },
+    ],
   },
 
-  applicationCooldown:
-    24,
+  // =========================
+  // COMMAND BEHAVIOR
+  // =========================
+  commands: {
+    owners:
+      process.env.OWNER_IDS
+        ?.split(",")
+        .map((id) => id.trim())
+        .filter(Boolean) || [],
 
-  deleteDeniedAfter:
-    7,
+    defaultCooldown: 3,
 
-  deleteApprovedAfter:
-    30,
+    deleteCommands: false,
 
-  managerRoles:
-    [],
+    testGuildId:
+      process.env.TEST_GUILD_ID,
 
-},
+    maintenanceMode:
+      process.env.MAINTENANCE_MODE === "true",
 
-// ============================================================
-// EMBED COLORS & BRANDING
-// ============================================================
-
-embeds: {
-
-  colors: {
-
-    primary:
-      "#336699",
-
-    secondary:
-      "#2F3136",
-
-    success:
-      "#57F287",
-
-    error:
-      "#ED4245",
-
-    warning:
-      "#FEE75C",
-
-    info:
-      "#3498DB",
-
-    light:
-      "#FFFFFF",
-
-    dark:
-      "#202225",
-
-    gray:
-      "#99AAB5",
-
-    blurple:
-      "#5865F2",
-
-    green:
-      "#57F287",
-
-    yellow:
-      "#FEE75C",
-
-    fuchsia:
-      "#EB459E",
-
-    red:
-      "#ED4245",
-
-    black:
-      "#000000",
-
-    giveaway: {
-
-      active:
-        "#57F287",
-
-      ended:
-        "#ED4245",
-
-    },
-
-    ticket: {
-
-      open:
-        "#57F287",
-
-      claimed:
-        "#FAA61A",
-
-      closed:
-        "#ED4245",
-
-      pending:
-        "#99AAB5",
-
-    },
-
-    economy:
-      "#F1C40F",
-
-    birthday:
-      "#E91E63",
-
-    moderation:
-      "#9B59B6",
-
-    priority: {
-
-      none:
-        "#95A5A6",
-
-      low:
-        "#3498db",
-
-      medium:
-        "#2ecc71",
-
-      high:
-        "#f1c40f",
-
-      urgent:
-        "#e74c3c",
-
-    },
-
+    prefix:
+      process.env.PREFIX || "!",
   },
 
-  footer: {
-
-    text:
-      "Titan Bot",
-
-    icon:
-      null,
-
-  },
-
-  thumbnail:
-    null,
-
-  author: {
-
-    name:
-      null,
-
-    icon:
-      null,
-
-    url:
-      null,
-
-  },
-
-},
-
-// ============================================================
-// CRT TRADING SETTINGS
-// ============================================================
-//
-// IMPORTANT
-//
-// CRT SERVICE:
-//
-//   MEXC FUTURES ONLY
-//
-// TOP-DOWN:
-//
-//   1D
-//   4H
-//   1H
-//   15M
-//   5M
-//
-// 30M IS REMOVED.
-//
-// Rachel T Fractal is the ONLY CRT confirmation.
-//
-// RSI is DISPLAY ONLY.
-// Standard Deviation is disabled.
-// Market Structure is disabled.
-//
-// ============================================================
-
-crt: {
-
-  enabled:
-    true,
-
-  autoAlerts:
-    true,
-
-  timezone:
-    "Asia/Manila",
-
-// ==========================================================
-// CRT TIMEFRAMES
-// ==========================================================
-
-  timeframes: {
-
-    "5m":
-      5,
-
-    "15m":
-      15,
-
-    "1h":
-      60,
-
-    "4h":
-      240,
-
-    "1d":
-      1440,
-
-  },
-
-// ==========================================================
-// DISCORD CHANNELS
-// ==========================================================
-
-  channels: {
-
-    "5m":
-      "1536311840378986547",
-
-    "15m":
-      "1536085573691773060",
-
-    "1h":
-      "1536085667216367728",
-
-    "4h":
-      "1536085721192857600",
-
-    "1d":
-      "1536085794576404480",
-
-  },
-
-// ==========================================================
-// CHECK INTERVAL
-// ==========================================================
-//
-// 30 seconds.
-//
-// ==========================================================
-
-  checkInterval:
-    30000,
-
-// ==========================================================
-// RACHEL T FRACTAL MODE
-// ==========================================================
-
-  filterBW:
-    false,
-
-// ==========================================================
-// FILTERS
-// ==========================================================
-
-  filteredTop:
-    true,
-
-  filteredBottom:
-    true,
-
-// ==========================================================
-// SIGNAL PRICE
-// ==========================================================
-
-  priceSource:
-    "close",
-
-// ==========================================================
-// RSI
-// ==========================================================
-//
-// DISPLAY ONLY.
-// DOES NOT CREATE SIGNALS.
-//
-// ==========================================================
-
-  rsi: {
-
-    period:
-      14,
-
-    overbought:
-      70,
-
-    oversold:
-      30,
-
-  },
-
-// ==========================================================
-// MARKET PROVIDERS
-// ==========================================================
-
-  providers: {
-
-    crypto: {
-
-      name:
-        "MEXC FUTURES",
-
-      api:
-        "https://api.mexc.com",
-
-      futuresOnly:
-        true,
-
-      spotEnabled:
-        false,
-
-    },
-
-    forex: {
-
-      name:
-        "OANDA",
-
-      environment:
-        process.env.OANDA_ENVIRONMENT ||
-        "live",
-
-    },
-
-  },
-
-// ==========================================================
-// MEXC FUTURES
-// ==========================================================
-
-  mexc: {
-
-    api:
-      "https://contract.mexc.com",
-
-    futuresOnly:
-      true,
-
-    spotEnabled:
-      false,
-
-  },
-
-// ==========================================================
-// OANDA
-// ==========================================================
-
-  oanda: {
-
-    apiKey:
-      process.env.OANDA_API_KEY ||
-      "",
-
-    accountId:
-      process.env.OANDA_ACCOUNT_ID ||
-      "",
-
-    environment:
-      process.env.OANDA_ENVIRONMENT ||
-      "live",
-
-  },
-
-// ==========================================================
-// DISCORD OUTPUT
-// ==========================================================
-
-  message: {
-
-    showProvider:
-      false,
-
-    showFractalName:
-      false,
-
-    showRachelName:
-      false,
-
-    showSignalPrice:
-      true,
-
-    showRSI:
-      true,
-
-    showRSIState:
-      true,
-
-  },
-
-// ==========================================================
-// SIGNAL COLORS
-// ==========================================================
-
-  colors: {
-
-    buy:
-      "#57F287",
-
-    sell:
-      "#ED4245",
-
-    neutral:
-      "#5865F2",
-
-  },
-
-// ==========================================================
-// FOOTER
-// ==========================================================
-
-  footer:
-    "CRT • PDYN",
-
-},
-
-// ============================================================
-// ECONOMY SETTINGS
-// ============================================================
-
-economy: {
-
-  currency: {
-
-    name:
-      "coins",
-
-    namePlural:
-      "coins",
-
-    symbol:
-      "$",
-
-  },
-
-  startingBalance:
-    0,
-
-  baseBankCapacity:
-    100000,
-
-  dailyAmount:
-    100,
-
-  workMin:
-    10,
-
-  workMax:
-    100,
-
-  begMin:
-    5,
-
-  begMax:
-    50,
-
-  cooldowns: {
-
-    daily:
-      24 *
-      60 *
-      60 *
-      1000,
-
-    work:
-      60 *
-      60 *
-      1000,
-
-    crime:
-      2 *
-      60 *
-      60 *
-      1000,
-
-    rob:
-      4 *
-      60 *
-      60 *
-      1000,
-
-  },
-
-  robSuccessRate:
-    0.4,
-
-  robFailJailTime:
-    3600000,
-
-},
-
-// ============================================================
-// SHOP SETTINGS
-// ============================================================
-
-shop:
-  {},
-
-// ============================================================
-// TICKET SYSTEM
-// ============================================================
-
-tickets: {
-
-  defaultCategory:
-    null,
-
-  supportRoles:
-    [],
-
-  priorities: {
-
-    none: {
-
-      emoji:
-        "⚪",
-
-      color:
-        "#95A5A6",
-
-      label:
-        "None",
-
-    },
-
-    low: {
-
-      emoji:
-        "🟢",
-
-      color:
-        "#2ECC71",
-
-      label:
-        "Low",
-
-    },
-
-    medium: {
-
-      emoji:
-        "🟡",
-
-      color:
-        "#F1C40F",
-
-      label:
-        "Medium",
-
-    },
-
-    high: {
-
-      emoji:
-        "🔴",
-
-      color:
-        "#E74C3C",
-
-      label:
-        "High",
-
-    },
-
-    urgent: {
-
-      emoji:
-        "🚨",
-
-      color:
-        "#E91E63",
-
-      label:
-        "Urgent",
-
-    },
-
-  },
-
-  defaultPriority:
-    "none",
-
-  archiveCategory:
-    null,
-
-  logChannel:
-    null,
-
-},
-
-// ============================================================
-// GIVEAWAY SETTINGS
-// ============================================================
-
-giveaways: {
-
-  defaultDuration:
-    86400000,
-
-  minimumWinners:
-    1,
-
-  maximumWinners:
-    10,
-
-  minimumDuration:
-    300000,
-
-  maximumDuration:
-    2592000000,
-
-  allowedRoles:
-    [],
-
-  bypassRoles:
-    [],
-
-},
-
-// ============================================================
-// BIRTHDAY SETTINGS
-// ============================================================
-
-birthday: {
-
-  defaultRole:
-    null,
-
-  announcementChannel:
-    null,
-
-  timezone:
-    "Asia/Manila",
-
-},
-
-// ============================================================
-// VERIFICATION SETTINGS
-// ============================================================
-
-verification: {
-
-  defaultMessage:
-    "Click the button below to verify yourself and gain access to the server!",
-
-  defaultButtonText:
-    "Verify",
-
-  autoVerify: {
-
-    defaultCriteria:
-      "none",
-
-    defaultAccountAgeDays:
-      7,
-
-    serverSizeThreshold:
-      1000,
-
-    minAccountAge:
-      1,
-
-    maxAccountAge:
-      365,
-
-    sendDMNotification:
-      true,
-
-    criteria: {
-
-      account_age:
-        "Account must be older than specified days",
-
-      server_size:
-        "All users if server has less than 1000 members",
-
-      none:
-        "All users immediately",
-
-    },
-
-  },
-
-  verificationCooldown:
-    5000,
-
-  maxVerificationAttempts:
-    3,
-
-  attemptWindow:
-    60000,
-
-  maxCooldownEntries:
-    10000,
-
-  maxAttemptEntries:
-    10000,
-
-  cooldownCleanupInterval:
-    300000,
-
-  maxAuditMetadataBytes:
-    4096,
-
-  maxInMemoryAuditEntries:
-    1000,
-
-  logAllVerifications:
-    true,
-
-  keepAuditTrail:
-    true,
-
-},
-
-// ============================================================
-// WELCOME / GOODBYE
-// ============================================================
-
-welcome: {
-
-  defaultWelcomeMessage:
-    "Welcome {user} to {server}! We now have {memberCount} members!",
-
-  defaultGoodbyeMessage:
-    "{user} has left the server. We now have {memberCount} members.",
-
-  defaultWelcomeChannel:
-    null,
-
-  defaultGoodbyeChannel:
-    null,
-
-},
-
-// ============================================================
-// COUNTER CHANNELS
-// ============================================================
-
-counters: {
-
-  defaults: {
-
-    name:
-      "{name} Counter",
-
-    description:
-      "Server {name} counter",
-
-    type:
-      "voice",
-
-    channelName:
-      "{name}-{count}",
-
-  },
-
-  permissions: {
-
-    deny: [
-      "VIEW_CHANNEL",
+  // =========================
+  // APPLICATIONS SYSTEM
+  // =========================
+  applications: {
+    defaultQuestions: [
+      {
+        question: "What is your name?",
+        required: true,
+      },
+      {
+        question: "How old are you?",
+        required: true,
+      },
+      {
+        question: "Why do you want to join?",
+        required: true,
+      },
     ],
 
-    allow: [
-      "VIEW_CHANNEL",
-      "CONNECT",
-      "SPEAK",
-    ],
+    statusColors: {
+      pending: "#FFA500",
+      approved: "#00FF00",
+      denied: "#FF0000",
+    },
 
+    applicationCooldown: 24,
+
+    deleteDeniedAfter: 7,
+
+    deleteApprovedAfter: 30,
+
+    managerRoles: [],
   },
 
-  messages: {
+  // =========================
+  // EMBED COLORS & BRANDING
+  // =========================
+  embeds: {
+    colors: {
+      primary: "#336699",
+      secondary: "#2F3136",
 
-    created:
-      "✅ Created counter **{name}**",
+      success: "#57F287",
+      error: "#ED4245",
+      warning: "#FEE75C",
+      info: "#3498DB",
 
-    deleted:
-      "🗑️ Deleted counter **{name}**",
+      light: "#FFFFFF",
+      dark: "#202225",
+      gray: "#99AAB5",
 
-    updated:
-      "🔄 Updated counter **{name}**",
+      blurple: "#5865F2",
+      green: "#57F287",
+      yellow: "#FEE75C",
+      fuchsia: "#EB459E",
+      red: "#ED4245",
+      black: "#000000",
 
+      giveaway: {
+        active: "#57F287",
+        ended: "#ED4245",
+      },
+
+      ticket: {
+        open: "#57F287",
+        claimed: "#FAA61A",
+        closed: "#ED4245",
+        pending: "#99AAB5",
+      },
+
+      economy: "#F1C40F",
+      birthday: "#E91E63",
+      moderation: "#9B59B6",
+
+      priority: {
+        none: "#95A5A6",
+        low: "#3498db",
+        medium: "#2ecc71",
+        high: "#f1c40f",
+        urgent: "#e74c3c",
+      },
+    },
+
+    footer: {
+      text: "Titan Bot",
+      icon: null,
+    },
+
+    thumbnail: null,
+
+    author: {
+      name: null,
+      icon: null,
+      url: null,
+    },
   },
 
-  types: {
+  // =========================
+  // CRT TRADING SETTINGS
+  // =========================
+  crt: {
+    enabled: true,
+    autoAlerts: true,
+    timezone: "Asia/Manila",
 
-    members: {
+    // MEXC market data modes.
+    // Spot uses symbols such as BTCUSDT.
+    // Futures uses symbols such as BTC_USDT.
+    markets: process.env.CRT_MARKETS || "spot,futures",
 
-      name:
-        "👥 Members",
+    autoSymbols: process.env.CRT_AUTO_SYMBOLS !== "false",
+    quoteAsset: process.env.CRT_QUOTE_ASSET || "USDT",
+    maxSymbolsPerMarket: Number(process.env.CRT_MAX_SYMBOLS_PER_MARKET || 30),
+    symbolRefreshMs: Number(process.env.CRT_SYMBOL_REFRESH_MS || 900000),
+
+    scanInterval: Number(process.env.CRT_SCAN_INTERVAL_MS || 30000),
+    klineLimit: Number(process.env.CRT_KLINE_LIMIT || 100),
+
+    // Optional manual symbol lists. Leave blank to auto-discover MEXC symbols.
+    // Examples:
+    // MEXC_SPOT_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT
+    // MEXC_FUTURES_SYMBOLS=BTC_USDT,ETH_USDT,SOL_USDT,EUR_USDT
+
+    rsi: {
+      period: Number(process.env.CRT_RSI_PERIOD || 14),
+      oversold: Number(process.env.CRT_RSI_OVERSOLD || 30),
+      overbought: Number(process.env.CRT_RSI_OVERBOUGHT || 70),
+    },
+
+    // Standard CRT: sweep parent high/low and close back inside parent range.
+    // Rachel_T exact parity requires the original TradingView source/script.
+    requireCloseInside: process.env.CRT_REQUIRE_CLOSE_INSIDE !== "false",
+    useCloseDirection: process.env.CRT_USE_CLOSE_DIRECTION === "true",
+    minBodyRatio: Number(process.env.CRT_MIN_BODY_RATIO || 0),
+
+    timeframes: {
+      "5m": 5,
+      "15m": 15,
+      "30m": 30,
+      "1h": 60,
+      "4h": 240,
+      "1d": 1440,
+    },
+
+    channels: {
+      "5m": "1536085497087135795",
+      "15m": "1536085573691773060",
+      "30m": "1536085618981871648",
+      "1h": "1536085667216367728",
+      "4h": "1536085721192857600",
+      "1d": "1536085794576404480",
+    },
+
+    color: "#5865F2",
+    footer: "CRT • PDYN • MEXC",
+  },
+
+  // =========================
+  // ECONOMY SETTINGS
+  // =========================
+  economy: {
+    currency: {
+      name: "coins",
+      namePlural: "coins",
+      symbol: "$",
+    },
+
+    startingBalance: 0,
+
+    baseBankCapacity: 100000,
+
+    dailyAmount: 100,
+
+    workMin: 10,
+    workMax: 100,
+
+    begMin: 5,
+    begMax: 50,
+
+    cooldowns: {
+      daily: 24 * 60 * 60 * 1000,
+      work: 60 * 60 * 1000,
+      crime: 2 * 60 * 60 * 1000,
+      rob: 4 * 60 * 60 * 1000,
+    },
+
+    robSuccessRate: 0.4,
+
+    robFailJailTime: 3600000,
+  },
+
+  // =========================
+  // SHOP SETTINGS
+  // =========================
+  shop: {},
+
+  // =========================
+  // TICKET SYSTEM
+  // =========================
+  tickets: {
+    defaultCategory: null,
+
+    supportRoles: [],
+
+    priorities: {
+      none: {
+        emoji: "⚪",
+        color: "#95A5A6",
+        label: "None",
+      },
+
+      low: {
+        emoji: "🟢",
+        color: "#2ECC71",
+        label: "Low",
+      },
+
+      medium: {
+        emoji: "🟡",
+        color: "#F1C40F",
+        label: "Medium",
+      },
+
+      high: {
+        emoji: "🔴",
+        color: "#E74C3C",
+        label: "High",
+      },
+
+      urgent: {
+        emoji: "🚨",
+        color: "#E91E63",
+        label: "Urgent",
+      },
+    },
+
+    defaultPriority: "none",
+
+    archiveCategory: null,
+
+    logChannel: null,
+  },
+
+  // =========================
+  // GIVEAWAY SETTINGS
+  // =========================
+  giveaways: {
+    defaultDuration: 86400000,
+
+    minimumWinners: 1,
+
+    maximumWinners: 10,
+
+    minimumDuration: 300000,
+
+    maximumDuration: 2592000000,
+
+    allowedRoles: [],
+
+    bypassRoles: [],
+  },
+
+  // =========================
+  // BIRTHDAY SETTINGS
+  // =========================
+  birthday: {
+    defaultRole: null,
+
+    announcementChannel: null,
+
+    timezone: "Asia/Manila",
+  },
+
+  // =========================
+  // VERIFICATION SETTINGS
+  // =========================
+  verification: {
+    defaultMessage:
+      "Click the button below to verify yourself and gain access to the server!",
+
+    defaultButtonText: "Verify",
+
+    autoVerify: {
+      defaultCriteria: "none",
+
+      defaultAccountAgeDays: 7,
+
+      serverSizeThreshold: 1000,
+
+      minAccountAge: 1,
+
+      maxAccountAge: 365,
+
+      sendDMNotification: true,
+
+      criteria: {
+        account_age:
+          "Account must be older than specified days",
+
+        server_size:
+          "All users if server has less than 1000 members",
+
+        none:
+          "All users immediately",
+      },
+    },
+
+    verificationCooldown: 5000,
+
+    maxVerificationAttempts: 3,
+
+    attemptWindow: 60000,
+
+    maxCooldownEntries: 10000,
+
+    maxAttemptEntries: 10000,
+
+    cooldownCleanupInterval: 300000,
+
+    maxAuditMetadataBytes: 4096,
+
+    maxInMemoryAuditEntries: 1000,
+
+    logAllVerifications: true,
+
+    keepAuditTrail: true,
+  },
+
+  // =========================
+  // WELCOME / GOODBYE
+  // =========================
+  welcome: {
+    defaultWelcomeMessage:
+      "Welcome {user} to {server}! We now have {memberCount} members!",
+
+    defaultGoodbyeMessage:
+      "{user} has left the server. We now have {memberCount} members.",
+
+    defaultWelcomeChannel: null,
+
+    defaultGoodbyeChannel: null,
+  },
+
+  // =========================
+  // COUNTER CHANNELS
+  // =========================
+  counters: {
+    defaults: {
+      name: "{name} Counter",
 
       description:
-        "Total members in the server",
+        "Server {name} counter",
 
-      getCount:
-        (guild) =>
+      type: "voice",
+
+      channelName: "{name}-{count}",
+    },
+
+    permissions: {
+      deny: ["VIEW_CHANNEL"],
+
+      allow: [
+        "VIEW_CHANNEL",
+        "CONNECT",
+        "SPEAK",
+      ],
+    },
+
+    messages: {
+      created:
+        "✅ Created counter **{name}**",
+
+      deleted:
+        "🗑️ Deleted counter **{name}**",
+
+      updated:
+        "🔄 Updated counter **{name}**",
+    },
+
+    types: {
+      members: {
+        name: "👥 Members",
+
+        description:
+          "Total members in the server",
+
+        getCount: (guild) =>
           guild.memberCount.toString(),
+      },
 
-    },
+      bots: {
+        name: "🤖 Bots",
 
-    bots: {
+        description:
+          "Total bot accounts in the server",
 
-      name:
-        "🤖 Bots",
-
-      description:
-        "Total bot accounts in the server",
-
-      getCount:
-        (guild) =>
+        getCount: (guild) =>
           guild.members.cache
-            .filter(
-              (m) =>
-                m.user.bot
-            )
+            .filter((m) => m.user.bot)
             .size
             .toString(),
+      },
 
-    },
+      members_only: {
+        name: "👤 Humans",
 
-    members_only: {
+        description:
+          "Total human members (non-bots)",
 
-      name:
-        "👤 Humans",
-
-      description:
-        "Total human members (non-bots)",
-
-      getCount:
-        (guild) =>
+        getCount: (guild) =>
           guild.members.cache
-            .filter(
-              (m) =>
-                !m.user.bot
-            )
+            .filter((m) => !m.user.bot)
             .size
             .toString(),
-
+      },
     },
-
   },
 
-},
+  // =========================
+  // GENERIC BOT MESSAGES
+  // =========================
+  messages: {
+    noPermission:
+      "You do not have permission to use this command.",
 
-// ============================================================
-// GENERIC BOT MESSAGES
-// ============================================================
+    cooldownActive:
+      "Please wait {time} before using this command again.",
 
-messages: {
+    errorOccurred:
+      "An error occurred while executing the command.",
 
-  noPermission:
-    "You do not have permission to use this command.",
+    missingPermissions:
+      "I am missing required permissions to perform this action.",
 
-  cooldownActive:
-    "Please wait {time} before using this command again.",
+    commandDisabled:
+      "This command has been disabled.",
 
-  errorOccurred:
-    "An error occurred while executing the command.",
+    maintenanceMode:
+      "The bot is currently in maintenance mode.",
+  },
 
-  missingPermissions:
-    "I am missing required permissions to perform this action.",
+  // =========================
+  // FEATURE TOGGLES
+  // =========================
+  features: {
+    economy: true,
 
-  commandDisabled:
-    "This command has been disabled.",
+    leveling: true,
 
-  maintenanceMode:
-    "The bot is currently in maintenance mode.",
+    moderation: true,
 
-},
+    logging: true,
 
-// ============================================================
-// FEATURE TOGGLES
-// ============================================================
+    welcome: true,
 
-features: {
+    tickets: true,
 
-  economy:
-    true,
+    giveaways: true,
 
-  leveling:
-    true,
+    birthday: true,
 
-  moderation:
-    true,
+    counter: true,
 
-  logging:
-    true,
+    verification: true,
 
-  welcome:
-    true,
+    reactionRoles: true,
 
-  tickets:
-    true,
+    joinToCreate: true,
 
-  giveaways:
-    true,
+    voice: true,
 
-  birthday:
-    true,
+    search: true,
 
-  counter:
-    true,
+    tools: true,
 
-  verification:
-    true,
+    utility: true,
 
-  reactionRoles:
-    true,
+    community: true,
 
-  joinToCreate:
-    true,
+    fun: true,
 
-  voice:
-    true,
+    music: true,
 
-  search:
-    true,
-
-  tools:
-    true,
-
-  utility:
-    true,
-
-  community:
-    true,
-
-  fun:
-    true,
-
-  music:
-    true,
-
-  crt:
-    true,
-
-},
-
+    crt: true,
+  },
 };
+
 
 // ============================================================
 // CONFIG VALIDATION
 // ============================================================
 
-export function validateConfig(
-  config
-) {
+export function validateConfig(config) {
+  const errors = [];
 
-  const errors =
-    [];
-
-  if (
-    process.env.NODE_ENV !==
-    "production"
-  ) {
-
+  if (process.env.NODE_ENV !== "production") {
     logger.debug(
       "Environment variables check:"
     );
@@ -1100,116 +569,77 @@ export function validateConfig(
       "NODE_ENV:",
       process.env.NODE_ENV
     );
-
   }
 
   if (
     !process.env.DISCORD_TOKEN &&
     !process.env.TOKEN
   ) {
-
     errors.push(
       "Bot token is required (DISCORD_TOKEN or TOKEN environment variable)"
     );
-
   }
 
-  if (
-    !process.env.CLIENT_ID
-  ) {
-
+  if (!process.env.CLIENT_ID) {
     errors.push(
       "Client ID is required (CLIENT_ID environment variable)"
     );
-
   }
 
   if (
-    process.env.NODE_ENV ===
-    "production"
+    process.env.NODE_ENV === "production"
   ) {
-
     const hasConnectionUrl =
       Boolean(
         process.env.POSTGRES_URL ||
         process.env.DATABASE_URL
       );
 
-    if (
-      !hasConnectionUrl
-    ) {
-
-      if (
-        !process.env.POSTGRES_HOST
-      ) {
-
+    if (!hasConnectionUrl) {
+      if (!process.env.POSTGRES_HOST) {
         errors.push(
           "PostgreSQL connection is required in production (set DATABASE_URL/POSTGRES_URL, or POSTGRES_HOST)"
         );
-
       }
 
-      if (
-        !process.env.POSTGRES_USER
-      ) {
-
+      if (!process.env.POSTGRES_USER) {
         errors.push(
           "PostgreSQL user is required in production (set DATABASE_URL/POSTGRES_URL, or POSTGRES_USER)"
         );
-
       }
 
-      if (
-        !process.env.POSTGRES_PASSWORD
-      ) {
-
+      if (!process.env.POSTGRES_PASSWORD) {
         errors.push(
           "PostgreSQL password is required in production (set DATABASE_URL/POSTGRES_URL, or POSTGRES_PASSWORD)"
         );
-
       }
-
     }
-
   }
 
   return errors;
-
 }
+
 
 // ============================================================
 // VALIDATE CONFIGURATION
 // ============================================================
 
 const configErrors =
-  validateConfig(
-    botConfig
-  );
+  validateConfig(botConfig);
 
-if (
-  configErrors.length >
-  0
-) {
-
+if (configErrors.length > 0) {
   logger.error(
     "Bot configuration errors:",
-    configErrors.join(
-      "\n"
-    )
+    configErrors.join("\n")
   );
 
   if (
-    process.env.NODE_ENV ===
-    "production"
+    process.env.NODE_ENV === "production"
   ) {
-
-    process.exit(
-      1
-    );
-
+    process.exit(1);
   }
-
 }
+
 
 // ============================================================
 // BOT CONFIG EXPORT
@@ -1218,70 +648,51 @@ if (
 export const BotConfig =
   botConfig;
 
+
 // ============================================================
 // COMMAND CATEGORY → FEATURE MAP
 // ============================================================
 
 const COMMAND_CATEGORY_FEATURE_MAP = {
+  birthday: "birthday",
 
-  birthday:
-    "birthday",
+  community: "community",
 
-  community:
-    "community",
+  economy: "economy",
 
-  economy:
-    "economy",
+  fun: "fun",
 
-  fun:
-    "fun",
+  giveaway: "giveaways",
 
-  giveaway:
-    "giveaways",
+  jointocreate: "joinToCreate",
 
-  jointocreate:
-    "joinToCreate",
+  leveling: "leveling",
 
-  leveling:
-    "leveling",
+  logging: "logging",
 
-  logging:
-    "logging",
+  moderation: "moderation",
 
-  moderation:
-    "moderation",
+  music: "music",
 
-  music:
-    "music",
+  reaction_roles: "reactionRoles",
 
-  reaction_roles:
-    "reactionRoles",
+  search: "search",
 
-  search:
-    "search",
+  serverstats: "counter",
 
-  serverstats:
-    "counter",
+  ticket: "tickets",
 
-  ticket:
-    "tickets",
+  tools: "tools",
 
-  tools:
-    "tools",
+  utility: "utility",
 
-  utility:
-    "utility",
+  verification: "verification",
 
-  verification:
-    "verification",
+  welcome: "welcome",
 
-  welcome:
-    "welcome",
-
-  crt:
-    "crt",
-
+  crt: "crt",
 };
+
 
 // ============================================================
 // CATEGORY NORMALIZATION
@@ -1290,88 +701,63 @@ const COMMAND_CATEGORY_FEATURE_MAP = {
 function normalizeCategoryKey(
   category
 ) {
-
-  return String(
-    category ||
-    ""
-  )
+  return String(category || "")
     .trim()
     .toLowerCase()
-    .replace(
-      /\s+/g,
-      "_"
-    );
-
+    .replace(/\s+/g, "_");
 }
+
 
 // ============================================================
 // COMMAND PREFIX
 // ============================================================
 
 export function getCommandPrefix() {
-
   return (
     botConfig.commands?.prefix ??
     "!"
   );
-
 }
+
 
 // ============================================================
 // BOT OWNERS
 // ============================================================
 
 export function getBotOwners() {
-
   return (
     botConfig.commands?.owners ??
     []
   )
-    .map(
-      (id) =>
-        String(
-          id
-        ).trim()
+    .map((id) =>
+      String(id).trim()
     )
-    .filter(
-      Boolean
-    );
-
+    .filter(Boolean);
 }
 
-export function isBotOwner(
-  userId
-) {
 
-  if (
-    !userId
-  ) {
-
+export function isBotOwner(userId) {
+  if (!userId) {
     return false;
-
   }
 
   return getBotOwners().includes(
-    String(
-      userId
-    )
+    String(userId)
   );
-
 }
+
 
 // ============================================================
 // MAINTENANCE MODE
 // ============================================================
 
 export function isMaintenanceMode() {
-
   return (
     botConfig.commands
-      ?.maintenanceMode ===
-    true
+      ?.maintenanceMode === true
   );
-
 }
+
 
 // ============================================================
 // BOT MESSAGES
@@ -1381,11 +767,8 @@ export function getBotMessage(
   key,
   replacements = {}
 ) {
-
   let message =
-    botConfig.messages?.[
-      key
-    ] ||
+    botConfig.messages?.[key] ||
     key;
 
   for (
@@ -1396,23 +779,19 @@ export function getBotMessage(
       replacements
     )
   ) {
-
     message =
       message.replace(
         new RegExp(
           `\\{${placeholder}\\}`,
           "g"
         ),
-        String(
-          value
-        )
+        String(value)
       );
-
   }
 
   return message;
-
 }
+
 
 // ============================================================
 // FEATURE CHECK
@@ -1421,23 +800,17 @@ export function getBotMessage(
 export function isFeatureEnabled(
   featureKey
 ) {
-
-  if (
-    !featureKey
-  ) {
-
+  if (!featureKey) {
     return true;
-
   }
 
   return (
     botConfig.features?.[
       featureKey
-    ] !==
-    false
+    ] !== false
   );
-
 }
+
 
 // ============================================================
 // COMMAND CATEGORY CHECK
@@ -1446,7 +819,6 @@ export function isFeatureEnabled(
 export function isCommandCategoryEnabled(
   category
 ) {
-
   const normalized =
     normalizeCategoryKey(
       category
@@ -1454,12 +826,9 @@ export function isCommandCategoryEnabled(
 
   if (
     !normalized ||
-    normalized ===
-    "core"
+    normalized === "core"
   ) {
-
     return true;
-
   }
 
   const featureKey =
@@ -1467,19 +836,15 @@ export function isCommandCategoryEnabled(
       normalized
     ];
 
-  if (
-    !featureKey
-  ) {
-
+  if (!featureKey) {
     return true;
-
   }
 
   return isFeatureEnabled(
     featureKey
   );
-
 }
+
 
 // ============================================================
 // APPLICATION STATUS COLOR
@@ -1488,60 +853,42 @@ export function isCommandCategoryEnabled(
 export function getApplicationStatusColor(
   status
 ) {
-
   const colors =
-    botConfig
-      .applications
-      ?.statusColors ||
-    {};
+    botConfig.applications
+      ?.statusColors || {};
 
   const hex =
-    colors[
-      status
-    ];
+    colors[status];
 
   return hex
-    ? getColor(
-        hex
-      )
+    ? getColor(hex)
     : getColor(
-        status ===
-        "approved"
+        status === "approved"
           ? "success"
-          : status ===
-            "denied"
+          : status === "denied"
             ? "error"
             : "warning"
       );
-
 }
+
 
 // ============================================================
 // DEFAULT APPLICATION QUESTIONS
 // ============================================================
 
 export function getDefaultApplicationQuestions() {
-
   return (
-    botConfig
-      .applications
-      ?.defaultQuestions ||
-    []
+    botConfig.applications
+      ?.defaultQuestions || []
   )
-    .map(
-      (
-        entry
-      ) =>
-        typeof entry ===
-        "string"
-          ? entry
-          : entry.question
+    .map((entry) =>
+      typeof entry === "string"
+        ? entry
+        : entry.question
     )
-    .filter(
-      Boolean
-    );
-
+    .filter(Boolean);
 }
+
 
 // ============================================================
 // COLOR HELPER
@@ -1549,109 +896,66 @@ export function getDefaultApplicationQuestions() {
 
 export function getColor(
   path,
-  fallback =
-    "#99AAB5"
+  fallback = "#99AAB5"
 ) {
-
-  if (
-    typeof path ===
-    "number"
-  ) {
-
+  if (typeof path === "number") {
     return path;
-
   }
 
   if (
-    typeof path ===
-      "string" &&
-    path.startsWith(
-      "#"
-    )
+    typeof path === "string" &&
+    path.startsWith("#")
   ) {
-
     return parseInt(
-      path.replace(
-        "#",
-        ""
-      ),
+      path.replace("#", ""),
       16
     );
-
   }
 
   if (
-    typeof path !==
-    "string"
+    typeof path !== "string"
   ) {
-
     return getColor(
       fallback
     );
-
   }
 
   const result =
-    path.split(
-      "."
-    ).reduce(
-      (
-        obj,
-        key
-      ) =>
+    path.split(".").reduce(
+      (obj, key) =>
         obj &&
-        obj[
-          key
-        ] !==
-          undefined
-          ? obj[
-              key
-            ]
+        obj[key] !== undefined
+          ? obj[key]
           : fallback,
       botConfig.embeds.colors
     );
 
   if (
-    typeof result ===
-      "string" &&
-    result.startsWith(
-      "#"
-    )
+    typeof result === "string" &&
+    result.startsWith("#")
   ) {
-
     return parseInt(
-      result.replace(
-        "#",
-        ""
-      ),
+      result.replace("#", ""),
       16
     );
-
   }
 
   return result;
-
 }
+
 
 // ============================================================
 // RANDOM COLOR
 // ============================================================
 
 export function getRandomColor() {
-
   const colors =
     Object.values(
       botConfig.embeds.colors
-    ).flatMap(
-      (
-        color
-      ) =>
-        typeof color ===
-        "string"
-          ? color
-          : Object.values(
-              color
-            )
+    ).flatMap((color) =>
+      typeof color === "string"
+        ? color
+        : Object.values(color)
     );
 
   return colors[
@@ -1660,8 +964,8 @@ export function getRandomColor() {
       colors.length
     )
   ];
-
 }
+
 
 // ============================================================
 // DEFAULT EXPORT
