@@ -59,49 +59,13 @@
 //
 //   FRACTAL PRICE
 //
+//   LIQUIDITY
+//   SWEPT / NOT SWEPT
+//
+//   SWEPT PRICE
+//   actual liquidity sweep price when available
+//
 //   CONFIRMED
-//
-// ============================================================
-// 5M TOP-DOWN RULE
-// ============================================================
-//
-// When a new 5M Rachel T fractal is confirmed:
-//
-//   5M
-//   ↓
-//   15M
-//   ↓
-//   1H
-//   ↓
-//   4H
-//   ↓
-//   1D
-//
-// All four HTFs must:
-//
-//   1. Have a stored confirmed CRT.
-//   2. Have the SAME CRT direction as 5M.
-//   3. Have market structure matching that direction.
-//
-// BUY:
-//
-//   5M BUY
-//   15M BUY + Bullish
-//   1H  BUY + Bullish
-//   4H  BUY + Bullish
-//   1D  BUY + Bullish
-//
-// SELL:
-//
-//   5M SELL
-//   15M SELL + Bearish
-//   1H  SELL + Bearish
-//   4H  SELL + Bearish
-//   1D  SELL + Bearish
-//
-// Otherwise:
-//
-//   DO NOT SEND 5M.
 //
 // ============================================================
 // IMPORTANT
@@ -109,18 +73,20 @@
 //
 // • 30M is removed.
 // • Rachel T is CRT confirmation.
-// • PostgreSQL persistence is handled by topDown.js.
-// • Previous HTF CRTs are NOT cleared.
+// • TopDown analysis is REMOVED.
+// • HTF alignment is REMOVED.
+// • 5M is NOT blocked by HTF conditions.
+// • Previous CRT state is handled locally.
 // • Startup historical fractals are baseline only.
 // • Duplicate signals are blocked.
 // • Only CLOSED candles are used.
 // • RSI is DISPLAY ONLY.
 // • STD DEV is DISPLAY ONLY.
-// • Market Structure is used for 5M alignment.
-// • 1D / 4H / 1H / 15M confirmations are sent normally.
-// • 5M is checked only after the HTF states are refreshed.
+// • Market Structure is DISPLAY ONLY.
 // • Scanner is synchronized to timeframe candle boundaries.
 // • MEXC API publication delay is accounted for.
+// • Liquidity sweep is INFORMATION ONLY.
+// • Liquidity sweep does NOT create or block a CRT.
 // ============================================================
 
 import {
@@ -134,17 +100,6 @@ import {
   getFuturesKlines,
   getMexcServiceInfo,
 } from "./mexcService.js";
-
-import {
-  isTopDownTimeframe,
-  getTopDownTimeframes,
-  updateTopDownCRT,
-  analyzeTopDown,
-  formatTopDownCount,
-  formatHTFCRTDetails,
-  getStoredTopDownState,
-  loadTopDownPersistence,
-} from "./topDown.js";
 
 // ============================================================
 // CONFIG
@@ -170,45 +125,11 @@ const TIMEFRAMES = {
 };
 
 // ============================================================
-// TOP-DOWN TIMEFRAMES
-// ============================================================
-
-const TOP_DOWN_TIMEFRAMES =
-  getTopDownTimeframes();
-
-// ============================================================
-// LOWER TIMEFRAME
-// ============================================================
-
-const LOWER_TIMEFRAME =
-  "5m";
-
-// ============================================================
-// HTF ALIGNMENT
-// ============================================================
-
-const HTF_ALIGNMENT_TIMEFRAMES = [
-  "15m",
-  "1h",
-  "4h",
-  "1d",
-];
-
-// ============================================================
 // SCAN PRIORITY
 // ============================================================
 //
-// IMPORTANT:
-//
-// Higher timeframes are always processed before lower
-// timeframes when they close at the same boundary.
-//
-// This is especially important for:
-//
-//   15M + 5M
-//   1H + 5M
-//   4H + 1H + 15M + 5M
-//   1D + 4H + 1H + 15M + 5M
+// Higher timeframes are processed before lower timeframes
+// when they close at the same boundary.
 //
 // ============================================================
 
@@ -222,17 +143,6 @@ const SCAN_PRIORITY = [
 
 // ============================================================
 // API / SCANNER CONFIG
-// ============================================================
-//
-// The old implementation used a fixed 30-second full scan.
-//
-// This implementation instead:
-//
-//   1. Waits for candle boundaries.
-//   2. Adds a short MEXC publication delay.
-//   3. Scans only the timeframe that actually closed.
-//   4. Processes higher timeframes before lower timeframes.
-//
 // ============================================================
 
 const CHECK_INTERVAL = 1000;
@@ -272,8 +182,7 @@ const CONCURRENCY =
 // ============================================================
 
 const MEXC_BLOCK_COOLDOWN =
-  30 *
-  1000;
+  30 * 1000;
 
 // ============================================================
 // RSI CONFIG
@@ -362,6 +271,9 @@ const startupBaseline =
 //   Bullish
 //   Bearish
 //
+// Market structure is DISPLAY ONLY.
+// It does not block CRT confirmation.
+//
 // ============================================================
 
 const marketStructureState =
@@ -391,31 +303,13 @@ let mexcSymbolsCacheTime =
   0;
 
 const SYMBOL_CACHE_TIME =
-  10 *
-  60 *
-  1000;
+  10 * 60 * 1000;
 
 let mexcBlockedUntil =
   0;
 
 // ============================================================
 // SCHEDULE STATE
-// ============================================================
-//
-// Prevents the same timeframe from being processed repeatedly
-// during the same candle boundary.
-//
-// Example:
-//
-// 15:15:02
-//
-// 15M is due.
-//
-// It is marked processed.
-//
-// The 1-second monitor loop will NOT scan 15M again until
-// the next 15M boundary.
-//
 // ============================================================
 
 const processedBoundaryState =
@@ -593,21 +487,19 @@ export function getCurrentCRT(
     getCRTNow();
 
   const totalMinutes =
-    now.hour *
-      60 +
+    now.hour * 60 +
     now.minute;
 
   const candleStart =
     Math.floor(
       totalMinutes /
-        minutes
-    ) *
-    minutes;
+      minutes
+    ) * minutes;
 
   const startHour =
     Math.floor(
       candleStart /
-        60
+      60
     );
 
   const startMinute =
@@ -621,9 +513,8 @@ export function getCurrentCRT(
   const endHour =
     Math.floor(
       endTotal /
-        60
-    ) %
-    24;
+      60
+    ) % 24;
 
   const endMinute =
     endTotal %
@@ -709,8 +600,6 @@ export function getCurrentCRT(
 //
 // Asia/Manila has no DST.
 //
-// This function avoids relying on the machine's local timezone.
-//
 // ============================================================
 
 function zonedPartsToTimestamp(
@@ -764,7 +653,7 @@ export function getRemainingTime(
         totalSeconds %
         3600
       ) /
-      60
+        60
     );
 
   const seconds =
@@ -898,16 +787,6 @@ function getTimeframeMilliseconds(
 
 // ============================================================
 // CLOSED CANDLE CHECK
-// ============================================================
-//
-// MEXC may provide closeTime.
-//
-// If it does not, we derive the close time from:
-//
-//   candle open timestamp
-//   +
-//   timeframe duration
-//
 // ============================================================
 
 function isClosedCandle(
@@ -1390,8 +1269,7 @@ function findLastFractal(
 
   for (
     let index =
-      candles.length -
-      1;
+      candles.length - 1;
 
     index >= 4;
 
@@ -1497,30 +1375,216 @@ function findNewestFractalAfter(
 }
 
 // ============================================================
-// TEST RACHEL FRACTAL
+// LIQUIDITY SWEEP DETECTION
+// ============================================================
+//
+// IMPORTANT:
+//
+// The confirmed Rachel T fractal is the reference liquidity
+// level.
+//
+// TOP:
+//
+//   candle high > fractal high
+//
+// BOTTOM:
+//
+//   candle low < fractal low
+//
+// The sweep does NOT create or block CRT confirmation.
+//
+// It only adds information to the confirmed CRT.
+//
 // ============================================================
 
-export function testRachelFractal(
-  candles
+function findLiquiditySweep(
+  candles,
+  signal
 ) {
   if (
     !Array.isArray(
       candles
-    )
+    ) ||
+    !signal
   ) {
-    return null;
+    return {
+      swept:
+        false,
+
+      sweptPrice:
+        null,
+
+      sweepTimestamp:
+        null,
+
+      sweepCandleTimestamp:
+        null,
+    };
   }
 
-  const closed =
-    getClosedCandles(
-      candles,
-      "15m"
+  const fractalPrice =
+    Number(
+      signal.fractalPrice
     );
 
-  return findLastFractal(
-    closed,
-    "15m"
-  );
+  if (
+    !Number.isFinite(
+      fractalPrice
+    )
+  ) {
+    return {
+      swept:
+        false,
+
+      sweptPrice:
+        null,
+
+      sweepTimestamp:
+        null,
+
+      sweepCandleTimestamp:
+        null,
+    };
+  }
+
+  let sweep =
+    null;
+
+  for (
+    const candle of
+    candles
+  ) {
+    const timestamp =
+      getCandleTimestamp(
+        candle
+      );
+
+    if (
+      !Number.isFinite(
+        timestamp
+      )
+    ) {
+      continue;
+    }
+
+    // --------------------------------------------------------
+    // Do not consider candles BEFORE the confirmed fractal.
+    // The liquidity belongs to the confirmed Rachel T level.
+    // --------------------------------------------------------
+
+    if (
+      timestamp <
+      signal.timestamp
+    ) {
+      continue;
+    }
+
+    if (
+      signal.fractalType ===
+      "TOP"
+    ) {
+      const high =
+        Number(
+          candle.high
+        );
+
+      if (
+        !Number.isFinite(
+          high
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        high >
+        fractalPrice
+      ) {
+        if (
+          !sweep ||
+          high >
+            sweep.sweptPrice
+        ) {
+          sweep = {
+            swept:
+              true,
+
+            sweptPrice:
+              high,
+
+            sweepTimestamp:
+              timestamp,
+
+            sweepCandleTimestamp:
+              timestamp,
+          };
+        }
+      }
+    }
+
+    if (
+      signal.fractalType ===
+      "BOTTOM"
+    ) {
+      const low =
+        Number(
+          candle.low
+        );
+
+      if (
+        !Number.isFinite(
+          low
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        low <
+        fractalPrice
+      ) {
+        if (
+          !sweep ||
+          low <
+            sweep.sweptPrice
+        ) {
+          sweep = {
+            swept:
+              true,
+
+            sweptPrice:
+              low,
+
+            sweepTimestamp:
+              timestamp,
+
+            sweepCandleTimestamp:
+              timestamp,
+          };
+        }
+      }
+    }
+  }
+
+  if (
+    !sweep
+  ) {
+    return {
+      swept:
+        false,
+
+      sweptPrice:
+        null,
+
+      sweepTimestamp:
+        null,
+
+      sweepCandleTimestamp:
+        null,
+    };
+  }
+
+  return sweep;
 }
 
 // ============================================================
@@ -1561,7 +1625,7 @@ export function calculateRSI(
 
   if (
     closes.length <=
-      period
+    period
   ) {
     return null;
   }
@@ -1762,7 +1826,7 @@ export function calculateStandardDeviation(
 
   if (
     values.length <
-      period
+    period
   ) {
     return null;
   }
@@ -1851,20 +1915,9 @@ export function calculateStandardDeviation(
 // MARKET STRUCTURE
 // ============================================================
 //
-// Bullish:
+// Market structure is DISPLAY ONLY.
 //
-//   Higher High
-//   +
-//   Higher Low
-//
-// Bearish:
-//
-//   Lower High
-//   +
-//   Lower Low
-//
-// If structure is mixed, recent price movement is used as
-// a fallback.
+// It no longer blocks 5M CRT.
 //
 // ============================================================
 
@@ -2115,7 +2168,7 @@ async function getSymbols() {
     mexcSymbolsCache &&
     now -
       mexcSymbolsCacheTime <
-      SYMBOL_CACHE_TIME
+        SYMBOL_CACHE_TIME
   ) {
     return mexcSymbolsCache;
   }
@@ -2444,18 +2497,6 @@ function formatDateTime(
 // ============================================================
 // FORMAT MARKET STRUCTURE
 // ============================================================
-//
-// Discord does not support arbitrary font colors inside an
-// embed field.
-//
-// Therefore:
-//
-//   Bullish = 🟢 Bullish
-//   Bearish = 🔴 Bearish
-//
-// The overall embed color is also changed accordingly.
-//
-// ============================================================
 
 function formatMarketStructure(
   structure
@@ -2533,31 +2574,6 @@ function getMarketStructureState(
 }
 
 // ============================================================
-// GET HTF MARKET STRUCTURES
-// ============================================================
-
-function getHTFMarketStructures(
-  symbol
-) {
-  const result = {};
-
-  for (
-    const timeframe of
-    HTF_ALIGNMENT_TIMEFRAMES
-  ) {
-    result[
-      timeframe
-    ] =
-      getMarketStructureState(
-        symbol,
-        timeframe
-      );
-  }
-
-  return result;
-}
-
-// ============================================================
 // BUILD MARKET ANALYSIS
 // ============================================================
 
@@ -2596,230 +2612,16 @@ function buildMarketAnalysis(
 }
 
 // ============================================================
-// CHECK 5M TOP-DOWN ALIGNMENT
-// ============================================================
-
-function check5MAlignment(
-  fiveMinuteSignal,
-  fiveMinuteMarketStructure,
-  topDown,
-  htfMarketStructures
-) {
-  if (
-    !fiveMinuteSignal ||
-    !topDown
-  ) {
-    return {
-      aligned:
-        false,
-
-      reason:
-        "Missing 5M or top-down state.",
-
-      direction:
-        null,
-
-      confirmed:
-        0,
-
-      total:
-        HTF_ALIGNMENT_TIMEFRAMES.length,
-
-      details:
-        [],
-    };
-  }
-
-  const direction =
-    fiveMinuteSignal.type ===
-    "BUY"
-      ? "BUY"
-      : "SELL";
-
-  const requiredStructure =
-    direction ===
-    "BUY"
-      ? "Bullish"
-      : "Bearish";
-
-  const details =
-    [];
-
-  let aligned =
-    true;
-
-  // ----------------------------------------------------------
-  // CURRENT 5M MARKET STRUCTURE
-  // ----------------------------------------------------------
-
-  const fiveMinuteAligned =
-    fiveMinuteMarketStructure ===
-    requiredStructure;
-
-  if (
-    !fiveMinuteAligned
-  ) {
-    aligned =
-      false;
-  }
-
-  details.push(
-    {
-      timeframe:
-        "5m",
-
-      crt:
-        direction,
-
-      marketStructure:
-        fiveMinuteMarketStructure,
-
-      aligned:
-        fiveMinuteAligned,
-    }
-  );
-
-  // ----------------------------------------------------------
-  // HTF CHECK
-  // ----------------------------------------------------------
-
-  for (
-    const timeframe of
-    HTF_ALIGNMENT_TIMEFRAMES
-  ) {
-    const signal =
-      topDown[
-        timeframe
-      ];
-
-    const structure =
-      htfMarketStructures[
-        timeframe
-      ];
-
-    const crtAligned =
-      Boolean(
-        signal
-      ) &&
-      signal.type ===
-        direction;
-
-    const structureAligned =
-      structure ===
-      requiredStructure;
-
-    const timeframeAligned =
-      crtAligned &&
-      structureAligned;
-
-    if (
-      !timeframeAligned
-    ) {
-      aligned =
-        false;
-    }
-
-    details.push(
-      {
-        timeframe,
-
-        crt:
-          signal
-            ? signal.type
-            : null,
-
-        marketStructure:
-          structure ||
-          null,
-
-        aligned:
-          timeframeAligned,
-      }
-    );
-  }
-
-  const confirmed =
-    HTF_ALIGNMENT_TIMEFRAMES
-      .filter(
-        timeframe =>
-          Boolean(
-            topDown[
-              timeframe
-            ]
-          )
-      )
-      .length;
-
-  if (
-    confirmed !==
-    HTF_ALIGNMENT_TIMEFRAMES.length
-  ) {
-    aligned =
-      false;
-  }
-
-  return {
-    aligned,
-
-    reason:
-      aligned
-        ? "5M CRT + all HTF CRTs + market structure aligned."
-        : "5M CRT is not fully aligned with HTF CRTs and market structure.",
-
-    direction,
-
-    requiredStructure,
-
-    confirmed,
-
-    total:
-      HTF_ALIGNMENT_TIMEFRAMES.length,
-
-    details,
-  };
-}
-
-// ============================================================
-// FORMAT ALIGNMENT
-// ============================================================
-
-function formatAlignment(
-  alignment
-) {
-  if (
-    !alignment
-  ) {
-    return "NOT ALIGNED";
-  }
-
-  if (
-    alignment.aligned
-  ) {
-    return (
-      `${alignment.direction} • ` +
-      `HTF ALIGNED • ` +
-      `${alignment.requiredStructure.toUpperCase()}`
-    );
-  }
-
-  return (
-    `NOT ALIGNED • ` +
-    `${alignment.confirmed}/4 HTF`
-  );
-}
-
-// ============================================================
 // CREATE DISCORD EMBED
 // ============================================================
 //
 // IMPORTANT:
 //
-// SIGNAL BUY / SELL HAS BEEN REMOVED.
+// CRT remains based on Rachel T.
 //
-// CANDLE FIELD HAS BEEN REMOVED.
+// TopDown / HTF / ALIGNMENT fields are removed.
 //
-// TOP-DOWN / HTF / ALIGNMENT are only displayed on a
-// successful 5M confirmation.
+// Liquidity information is additional information only.
 //
 // ============================================================
 
@@ -2830,11 +2632,10 @@ function createSignalEmbed(
     symbol,
     timeframe,
     signal,
-    topDown,
     marketStructure,
     rsiState,
     stdDev,
-    alignment,
+    liquidity,
   } = data;
 
   const structure =
@@ -2945,6 +2746,57 @@ function createSignalEmbed(
 
     {
       name:
+        "LIQUIDITY",
+
+      value:
+        liquidity?.swept
+          ? "SWEPT"
+          : "NOT SWEPT",
+
+      inline:
+        true,
+    },
+  ];
+
+  // ----------------------------------------------------------
+  // SWEPT PRICE
+  // ----------------------------------------------------------
+
+  if (
+    liquidity?.swept
+  ) {
+    fields.push(
+      {
+        name:
+          "SWEPT PRICE",
+
+        value:
+          formatPrice(
+            liquidity.sweptPrice
+          ),
+
+        inline:
+          true,
+      },
+
+      {
+        name:
+          "SWEEP TIME",
+
+        value:
+          formatDateTime(
+            liquidity.sweepTimestamp
+          ),
+
+        inline:
+          true,
+      }
+    );
+  }
+
+  fields.push(
+    {
+      name:
         "CONFIRMED",
 
       value:
@@ -2954,62 +2806,8 @@ function createSignalEmbed(
 
       inline:
         false,
-    },
-  ];
-
-  // ==========================================================
-  // 5M TOP-DOWN INFORMATION
-  // ==========================================================
-
-  if (
-    timeframe ===
-    LOWER_TIMEFRAME
-  ) {
-    fields.push(
-      {
-        name:
-          "TOP-DOWN",
-
-        value:
-          topDown
-            ? formatTopDownCount(
-                topDown
-              )
-            : "0/4 CONFIRMED",
-
-        inline:
-          true,
-      },
-
-      {
-        name:
-          "HTF CRT",
-
-        value:
-          topDown
-            ? formatHTFCRTDetails(
-                topDown
-              )
-            : "1D N/A • 4H N/A • 1H N/A • 15M N/A",
-
-        inline:
-          false,
-      },
-
-      {
-        name:
-          "ALIGNMENT",
-
-        value:
-          formatAlignment(
-            alignment
-          ),
-
-        inline:
-          false,
-      }
-    );
-  }
+    }
+  );
 
   return new EmbedBuilder()
     .setTitle(
@@ -3100,8 +2898,16 @@ async function sendCRTSignal(
     );
 
     console.log(
-      `[CRT] CRT CONFIRMATION SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.fractalType}`
+      `[CRT] CRT CONFIRMATION SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.type} | ${data.signal.fractalType} | LIQUIDITY: ${data.liquidity?.swept ? "SWEPT" : "NOT SWEPT"}`
     );
+
+    if (
+      data.liquidity?.swept
+    ) {
+      console.log(
+        `[CRT] LIQUIDITY SWEEP | ${data.symbol} | ${data.timeframe} | ${data.signal.fractalType} | FRACTAL: ${formatPrice(data.signal.fractalPrice)} | SWEPT: ${formatPrice(data.liquidity.sweptPrice)}`
+      );
+    }
 
     return true;
   } catch (
@@ -3272,31 +3078,6 @@ async function processMarket(
     );
 
   // ==========================================================
-  // UPDATE HTF PERSISTENCE
-  // ==========================================================
-  //
-  // IMPORTANT:
-  //
-  // This happens BEFORE 5M is evaluated.
-  //
-  // Therefore when 15M closes at the same time as a 5M
-  // boundary, the 15M state is refreshed first.
-  //
-  // ==========================================================
-
-  if (
-    isTopDownTimeframe(
-      normalizedTimeframe
-    )
-  ) {
-    updateTopDownCRT(
-      normalizedSymbol,
-      normalizedTimeframe,
-      signal
-    );
-  }
-
-  // ==========================================================
   // STARTUP BASELINE
   // ==========================================================
   //
@@ -3342,6 +3123,22 @@ async function processMarket(
   }
 
   // ==========================================================
+  // LIQUIDITY SWEEP
+  // ==========================================================
+  //
+  // This is checked AFTER Rachel T confirms the CRT.
+  //
+  // It does NOT affect CRT confirmation.
+  //
+  // ==========================================================
+
+  const liquidity =
+    findLiquiditySweep(
+      candles,
+      signal
+    );
+
+  // ==========================================================
   // SAVE STATE BEFORE DISCORD
   // ==========================================================
 
@@ -3349,74 +3146,6 @@ async function processMarket(
     stateKey,
     signal.timestamp
   );
-
-  // ==========================================================
-  // TOP-DOWN STATE
-  // ==========================================================
-
-  let topDown =
-    null;
-
-  let alignment =
-    null;
-
-  // ==========================================================
-  // 5M SPECIAL RULE
-  // ==========================================================
-
-  if (
-    normalizedTimeframe ===
-    LOWER_TIMEFRAME
-  ) {
-    // --------------------------------------------------------
-    // READ LATEST PERSISTENT HTF CRT
-    // --------------------------------------------------------
-
-    topDown =
-      analyzeTopDown(
-        normalizedSymbol,
-        signal
-      );
-
-    // --------------------------------------------------------
-    // READ HTF MARKET STRUCTURES
-    // --------------------------------------------------------
-
-    const htfMarketStructures =
-      getHTFMarketStructures(
-        normalizedSymbol
-      );
-
-    // --------------------------------------------------------
-    // CHECK ALIGNMENT
-    // --------------------------------------------------------
-
-    alignment =
-      check5MAlignment(
-        signal,
-        analysis.marketStructure,
-        topDown,
-        htfMarketStructures
-      );
-
-    // --------------------------------------------------------
-    // BLOCK UNALIGNED 5M
-    // --------------------------------------------------------
-
-    if (
-      !alignment.aligned
-    ) {
-      console.log(
-        `[CRT] 5M BLOCKED | ${normalizedSymbol} | ${signal.type} | ${alignment.confirmed}/4 HTF | ${alignment.reason}`
-      );
-
-      return;
-    }
-
-    console.log(
-      `[CRT] 5M ALIGNED | ${normalizedSymbol} | ${signal.type} | 15M + 1H + 4H + 1D | ${analysis.marketStructure}`
-    );
-  }
 
   // ==========================================================
   // SEND CRT CONFIRMATION
@@ -3435,8 +3164,6 @@ async function processMarket(
 
       candles,
 
-      topDown,
-
       marketStructure:
         analysis.marketStructure,
 
@@ -3449,7 +3176,7 @@ async function processMarket(
       stdDev:
         analysis.stdDev,
 
-      alignment,
+      liquidity,
     }
   );
 }
@@ -3540,8 +3267,7 @@ function getBoundaryKey(
     );
 
   const totalMinutes =
-    zoned.hour *
-      60 +
+    zoned.hour * 60 +
     zoned.minute;
 
   const boundaryMinute =
@@ -3589,22 +3315,6 @@ function getNextCandleCloseTimestamp(
 
 // ============================================================
 // IS TIMEFRAME DUE
-// ============================================================
-//
-// A timeframe becomes due shortly after its candle closes.
-//
-// Example:
-//
-// 15M candle:
-//
-// 21:00 -> 21:15
-//
-// At:
-//
-// 21:15 + CANDLE_CLOSE_DELAY
-//
-// the 15M scan is released.
-//
 // ============================================================
 
 function isTimeframeDue(
@@ -3675,23 +3385,18 @@ function markTimeframeProcessed(
 // ============================================================
 // GET DUE TIMEFRAMES
 // ============================================================
-//
-// ALWAYS returns highest timeframe first.
-//
-// ============================================================
 
 function getDueTimeframes() {
   const now =
     Date.now();
 
-  return SCAN_PRIORITY
-    .filter(
-      timeframe =>
-        isTimeframeDue(
-          timeframe,
-          now
-        )
-    );
+  return SCAN_PRIORITY.filter(
+    timeframe =>
+      isTimeframeDue(
+        timeframe,
+        now
+      )
+  );
 }
 
 // ============================================================
@@ -3756,29 +3461,6 @@ async function scanTimeframe(
 // ============================================================
 // SYNCHRONIZED SCAN
 // ============================================================
-//
-// This replaces the old:
-//
-//   scan everything every 30 seconds
-//
-// system.
-//
-// Example:
-//
-// 15:00:
-//
-//   15M + 5M are due.
-//
-// The scanner performs:
-//
-//   15M FIRST
-//   ↓
-//   5M SECOND
-//
-// Therefore the 5M top-down check sees the newest 15M
-// persistence state.
-//
-// ============================================================
 
 async function runSynchronizedScan(
   client
@@ -3830,20 +3512,20 @@ async function runSynchronizedScan(
     }
 
     console.log(
-      `[CRT] SYNCHRONIZED SCAN | ${dueTimeframes.map(
-        timeframe =>
-          timeframe.toUpperCase()
-      ).join(" -> ")}`
+      `[CRT] SYNCHRONIZED SCAN | ${dueTimeframes
+        .map(
+          timeframe =>
+            timeframe.toUpperCase()
+        )
+        .join(" -> ")}`
     );
 
     // ========================================================
-    // IMPORTANT
-    // ========================================================
-    //
     // Higher timeframes are processed first.
     //
-    // This is critical for 5M alignment.
+    // This is kept for scanner priority only.
     //
+    // There is NO TopDown dependency anymore.
     // ========================================================
 
     for (
@@ -4019,24 +3701,6 @@ async function initializeStartupBaseline(
 
         signal.timeframe =
           job.timeframe;
-
-        // ----------------------------------------------------
-        // Populate persistent HTF state.
-        //
-        // DO NOT send Discord alert.
-        // ----------------------------------------------------
-
-        if (
-          isTopDownTimeframe(
-            job.timeframe
-          )
-        ) {
-          updateTopDownCRT(
-            normalizedSymbol,
-            job.timeframe,
-            signal
-          );
-        }
       }
     );
   }
@@ -4044,8 +3708,8 @@ async function initializeStartupBaseline(
   // ==========================================================
   // Mark current boundaries as processed.
   //
-  // This prevents startup from immediately re-scanning the
-  // same candle boundary.
+  // Prevents startup from immediately re-scanning the same
+  // candle boundary.
   // ==========================================================
 
   for (
@@ -4077,27 +3741,12 @@ async function initializeStartupBaseline(
 }
 
 // ============================================================
-// INITIALIZE PERSISTENCE
+// INITIALIZE CRT STATE
 // ============================================================
 
 async function initializeCRTState(
   client
 ) {
-  try {
-    await loadTopDownPersistence();
-
-    console.log(
-      "[CRT] PostgreSQL top-down state initialized."
-    );
-  } catch (
-    error
-  ) {
-    console.error(
-      "[CRT] PostgreSQL top-down initialization failed:",
-      error.message
-    );
-  }
-
   await initializeStartupBaseline(
     client
   );
@@ -4180,15 +3829,19 @@ export function startCRTMonitor(
   );
 
   console.log(
-    "[CRT] PostgreSQL HTF persistence: ENABLED"
+    "[CRT] TopDown analysis: REMOVED"
   );
 
   console.log(
-    "[CRT] 5M HTF alignment: REQUIRED"
+    "[CRT] HTF alignment: REMOVED"
   );
 
   console.log(
-    "[CRT] Market Structure alignment: REQUIRED"
+    "[CRT] 5M blocking rule: REMOVED"
+  );
+
+  console.log(
+    "[CRT] Liquidity sweep detection: ENABLED"
   );
 
   console.log(
@@ -4197,6 +3850,10 @@ export function startCRTMonitor(
 
   console.log(
     "[CRT] Standard Deviation: DISPLAY ONLY"
+  );
+
+  console.log(
+    "[CRT] Market Structure: DISPLAY ONLY"
   );
 
   console.log(
@@ -4220,7 +3877,7 @@ export function startCRTMonitor(
   );
 
   console.log(
-    "[CRT] Discord output: CRT CONFIRMATION ONLY"
+    "[CRT] Discord output: CRT CONFIRMATION + LIQUIDITY"
   );
 
   console.log(
@@ -4228,7 +3885,7 @@ export function startCRTMonitor(
   );
 
   // ==========================================================
-  // LOAD DATABASE + BASELINE
+  // LOAD BASELINE
   // ==========================================================
 
   initializeCRTState(
@@ -4368,27 +4025,17 @@ export function getCRTMonitorStatus() {
         ...SCAN_PRIORITY,
       ],
 
-    topDownTimeframes:
-      [
-        ...TOP_DOWN_TIMEFRAMES,
-      ],
-
-    lowerTimeframe:
-      LOWER_TIMEFRAME,
-
-    fiveMinuteAlignment:
-      true,
-
-    requiredHTF:
-      [
-        ...HTF_ALIGNMENT_TIMEFRAMES,
-      ],
+    thirtyMinute:
+      false,
 
     rachelTFractal:
       true,
 
-    thirtyMinute:
-      false,
+    liquiditySweep:
+      true,
+
+    liquiditySweepInformationOnly:
+      true,
 
     rsi:
       true,
@@ -4400,10 +4047,16 @@ export function getCRTMonitorStatus() {
       true,
 
     persistentHTFState:
-      true,
+      false,
 
     databasePersistence:
-      "topDown.js",
+      null,
+
+    topDownAnalysis:
+      false,
+
+    fiveMinuteAlignment:
+      false,
 
     synchronizedToCandleClose:
       true,
@@ -4416,63 +4069,6 @@ export function getCRTMonitorStatus() {
 
     timezone:
       CRT_TIMEZONE,
-  };
-}
-
-// ============================================================
-// GET CURRENT TOP-DOWN STATE
-// ============================================================
-
-export function getCRTTopDownState(
-  symbol
-) {
-  return getStoredTopDownState(
-    normalizeSymbol(
-      symbol
-    )
-  );
-}
-
-// ============================================================
-// GET 5M ALIGNMENT STATE
-// ============================================================
-
-export function get5MAlignmentState(
-  symbol
-) {
-  const normalizedSymbol =
-    normalizeSymbol(
-      symbol
-    );
-
-  const topDown =
-    getStoredTopDownState(
-      normalizedSymbol
-    );
-
-  const marketStructures =
-    getHTFMarketStructures(
-      normalizedSymbol
-    );
-
-  return {
-    symbol:
-      normalizedSymbol,
-
-    topDown,
-
-    marketStructures,
-
-    requiredTimeframes:
-      [
-        ...HTF_ALIGNMENT_TIMEFRAMES,
-      ],
-
-    lowerTimeframe:
-      LOWER_TIMEFRAME,
-
-    alignmentRequired:
-      true,
   };
 }
 
@@ -4560,9 +4156,9 @@ function formatDuration(
     Math.floor(
       (
         totalSeconds %
-        3600
+          3600
       ) /
-      60
+        60
     );
 
   const seconds =
@@ -4616,23 +4212,28 @@ export function getCRTServiceInfo() {
         "30m",
       ],
 
-    topDownTimeframes:
-      [
-        ...TOP_DOWN_TIMEFRAMES,
-      ],
-
-    lowerTimeframe:
-      LOWER_TIMEFRAME,
+    topDownAnalysis:
+      false,
 
     fiveMinuteAlignment:
-      true,
+      false,
 
     requiredFiveMinuteHTF:
-      [
-        ...HTF_ALIGNMENT_TIMEFRAMES,
-      ],
+      [],
 
     rachelTFractal:
+      true,
+
+    liquiditySweep:
+      true,
+
+    liquiditySweepInformationOnly:
+      true,
+
+    liquiditySweepUsesFractalPrice:
+      true,
+
+    liquiditySweepReportsPrice:
       true,
 
     rsi:
@@ -4657,6 +4258,9 @@ export function getCRTServiceInfo() {
     marketStructure:
       true,
 
+    marketStructureDisplayOnly:
+      true,
+
     marketStructureValues:
       [
         "Bullish",
@@ -4673,16 +4277,13 @@ export function getCRTServiceInfo() {
       },
 
     persistentPreviousCRT:
-      true,
+      false,
 
     persistentHTFState:
-      true,
+      false,
 
     databasePersistence:
-      "topDown.js",
-
-    topDownCandleSynchronization:
-      true,
+      null,
 
     closedCandleConfirmation:
       true,
@@ -4738,7 +4339,27 @@ console.log(
 );
 
 console.log(
-  "[CRT] PostgreSQL top-down persistence enabled."
+  "[CRT] TopDown analysis removed."
+);
+
+console.log(
+  "[CRT] HTF alignment removed."
+);
+
+console.log(
+  "[CRT] 5M alignment requirement removed."
+);
+
+console.log(
+  "[CRT] Liquidity sweep detection enabled."
+);
+
+console.log(
+  "[CRT] Liquidity sweep is informational only."
+);
+
+console.log(
+  "[CRT] Liquidity sweep price reporting enabled."
 );
 
 console.log(
@@ -4754,14 +4375,6 @@ console.log(
 );
 
 console.log(
-  "[CRT] 5M requires complete HTF CRT alignment."
-);
-
-console.log(
-  "[CRT] 5M requires market structure alignment."
-);
-
-console.log(
   "[CRT] Candle-boundary synchronization enabled."
 );
 
@@ -4774,7 +4387,7 @@ console.log(
 );
 
 console.log(
-  "[CRT] Discord output: CRT CONFIRMATION ONLY."
+  "[CRT] Discord output: CRT CONFIRMATION + LIQUIDITY."
 );
 
 console.log(
