@@ -34,8 +34,8 @@
 //
 // 1D / 4H / 1H / 15M:
 //
-//   A confirmed Rachel T fractal produces a signal in its
-//   designated Discord channel.
+//   A confirmed Rachel T fractal produces a CRT confirmation
+//   in its designated Discord channel.
 //
 // 5M:
 //
@@ -94,25 +94,19 @@
 //   • RSI is DISPLAY ONLY.
 //   • STD DEV is DISPLAY ONLY.
 //   • Market Structure is used for 5M alignment.
-//   • 1D / 4H / 1H / 15M signals are still sent normally.
+//   • 1D / 4H / 1H / 15M confirmations are still sent normally.
 //
 // ============================================================
 //
 // DISCORD OUTPUT:
 //
-//   PDYN SIGNAL: BTC_USDT
+//   PDYN CRT CONFIRMATION: BTC_USDT
 //
 //   SOURCE
 //   MEXC
 //
 //   TIMEFRAME
-//   5M
-//
-//   SIGNAL
-//   BUY
-//
-//   FRACTAL
-//   BOTTOM
+//   15M
 //
 //   RSI
 //   Neutral / **Overbought** / **Oversold**
@@ -124,25 +118,12 @@
 //   Low / Medium / High
 //
 //   MARKET STRUCTURE
-//   Bullish / Bearish
-//
-//   CANDLE
-//   date/time + timeframe
+//   🟢 Bullish
+//   🔴 Bearish
 //
 //   PRICE
 //
 //   FRACTAL PRICE
-//
-//   CONFIRMED
-//
-//   TOP-DOWN
-//   4/4 CONFIRMED
-//
-//   HTF CRT
-//   1D BUY • 4H BUY • 1H BUY • 15M BUY
-//
-//   ALIGNMENT
-//   5M BUY • HTF BUY • STRUCTURE BULLISH
 //
 // ============================================================
 
@@ -301,15 +282,13 @@ const RSI_OVERSOLD =
 // ============================================================
 // STANDARD DEVIATION
 // ============================================================
+//
+// DISPLAY ONLY.
+//
+// ============================================================
 
 const STD_DEV_PERIOD =
   20;
-
-// Relative volatility thresholds.
-//
-// These are DISPLAY classifications only.
-//
-// ============================================================
 
 const STD_DEV_LOW_PERCENT =
   0.50;
@@ -827,14 +806,6 @@ function isClosedCandle(
 // ============================================================
 // RACHEL T TOP
 // ============================================================
-//
-// Five candle confirmation:
-//
-//   c4 c3 c2 c1 c0
-//
-// c2 = fractal candle
-//
-// ============================================================
 
 function isRachelTop(
   candles,
@@ -1053,7 +1024,7 @@ function buildFractalSignal(
   const volume =
     Number(
       candle.volume ??
-      0
+        0
     );
 
   if (
@@ -1162,8 +1133,7 @@ function findLastFractal(
 
   for (
     let index =
-      candles.length -
-      1;
+      candles.length - 1;
     index >= 4;
     index--
   ) {
@@ -1211,7 +1181,7 @@ function findNewestFractalAfter(
   for (
     let index = 4;
     index <
-    candles.length;
+      candles.length;
     index++
   ) {
     const fractalIndex =
@@ -1225,7 +1195,7 @@ function findNewestFractalAfter(
     const timestamp =
       Number(
         candle?.timestamp ??
-        candle?.openTime
+          candle?.openTime
       );
 
     if (
@@ -1369,7 +1339,7 @@ export function calculateRSI(
     let i =
       period + 1;
     i <
-    closes.length;
+      closes.length;
     i++
   ) {
     const change =
@@ -1670,7 +1640,7 @@ function getMarketStructure(
   for (
     let index = 4;
     index <
-    candles.length;
+      candles.length;
     index++
   ) {
     const fractalIndex =
@@ -1700,7 +1670,7 @@ function getMarketStructure(
             timestamp:
               Number(
                 candle.timestamp ??
-                candle.openTime
+                  candle.openTime
               ),
 
             price:
@@ -1736,7 +1706,7 @@ function getMarketStructure(
             timestamp:
               Number(
                 candle.timestamp ??
-                candle.openTime
+                  candle.openTime
               ),
 
             price:
@@ -1891,7 +1861,7 @@ async function getSymbols() {
   if (
     mexcSymbolsCache &&
     now -
-      mexcSymbolsCacheTime <
+        mexcSymbolsCacheTime <
       SYMBOL_CACHE_TIME
   ) {
     return mexcSymbolsCache;
@@ -1992,7 +1962,7 @@ async function fetchCandles(
           Number.isFinite(
             Number(
               candle.timestamp ??
-              candle.openTime
+                candle.openTime
             )
           ) &&
           Number.isFinite(
@@ -2023,11 +1993,11 @@ async function fetchCandles(
         ) =>
           Number(
             a.timestamp ??
-            a.openTime
+              a.openTime
           ) -
           Number(
             b.timestamp ??
-            b.openTime
+              b.openTime
           )
       );
   } catch (
@@ -2131,7 +2101,9 @@ function formatVolume(
       (
         volume /
         1000000000
-      ).toFixed(2) +
+      ).toFixed(
+        2
+      ) +
       "B"
     );
   }
@@ -2144,7 +2116,9 @@ function formatVolume(
       (
         volume /
         1000000
-      ).toFixed(2) +
+      ).toFixed(
+        2
+      ) +
       "M"
     );
   }
@@ -2157,118 +2131,23 @@ function formatVolume(
       (
         volume /
         1000
-      ).toFixed(2) +
+      ).toFixed(
+        2
+      ) +
       "K"
     );
   }
 
   return Number(
     volume
-  ).toFixed(2);
-}
-
-// ============================================================
-// FORMAT DATE/TIME
-// ============================================================
-
-function formatDateTime(
-  timestamp
-) {
-  if (
-    !Number.isFinite(
-      Number(
-        timestamp
-      )
-    )
-  ) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat(
-    "en-US",
-    {
-      timeZone:
-        CRT_TIMEZONE,
-
-      year:
-        "numeric",
-
-      month:
-        "2-digit",
-
-      day:
-        "2-digit",
-
-      hour:
-        "2-digit",
-
-      minute:
-        "2-digit",
-
-      second:
-        "2-digit",
-
-      hourCycle:
-        "h23",
-    }
-  ).format(
-    new Date(
-      Number(
-        timestamp
-      )
-    )
-  );
-}
-
-// ============================================================
-// FORMAT CANDLE
-// ============================================================
-//
-// Example:
-//
-//   08/10/2026 21:00:00 • 15M CANDLE
-//
-// ============================================================
-
-function formatCandle(
-  candle,
-  timeframe
-) {
-  if (
-    !candle
-  ) {
-    return "N/A";
-  }
-
-  const timestamp =
-    Number(
-      candle.timestamp ??
-      candle.openTime
-    );
-
-  if (
-    !Number.isFinite(
-      timestamp
-    )
-  ) {
-    return "N/A";
-  }
-
-  return (
-    `${formatDateTime(
-      timestamp
-    )} • ` +
-    `${String(
-      timeframe
-    ).toUpperCase()} CANDLE`
+  ).toFixed(
+    2
   );
 }
 
 // ============================================================
 // CHECK 5M TOP-DOWN ALIGNMENT
 // ============================================================
-//
-// THIS IS THE IMPORTANT NEW RULE.
 //
 // 5M can only be sent when:
 //
@@ -2492,7 +2371,70 @@ function formatAlignment(
 }
 
 // ============================================================
+// FORMAT MARKET STRUCTURE
+// ============================================================
+//
+// Bullish = green visual
+// Bearish = red visual
+//
+// Discord does not allow colored text inside an embed field,
+// therefore the embed itself changes color and an emoji is
+// used for the field.
+//
+// ============================================================
+
+function formatMarketStructure(
+  marketStructure
+) {
+  if (
+    marketStructure ===
+    "Bullish"
+  ) {
+    return "🟢 Bullish";
+  }
+
+  if (
+    marketStructure ===
+    "Bearish"
+  ) {
+    return "🔴 Bearish";
+  }
+
+  return "⚪ N/A";
+}
+
+// ============================================================
 // CREATE DISCORD EMBED
+// ============================================================
+//
+// OUTPUT:
+//
+//   PDYN CRT CONFIRMATION
+//
+//   SOURCE
+//   MEXC
+//
+//   TIMEFRAME
+//   15M
+//
+//   RSI
+//   Neutral / **Overbought** / **Oversold**
+//
+//   VOLUME
+//   123.45M
+//
+//   STD DEV
+//   Low / Medium / High
+//
+//   MARKET STRUCTURE
+//   🟢 Bullish
+//   OR
+//   🔴 Bearish
+//
+//   PRICE
+//
+//   FRACTAL PRICE
+//
 // ============================================================
 
 function createSignalEmbed(
@@ -2502,21 +2444,19 @@ function createSignalEmbed(
     symbol,
     timeframe,
     signal,
-    candles,
-    topDown,
     marketStructure,
     rsiState,
     stdDev,
-    alignment,
   } =
     data;
 
-  const isBuy =
-    signal.type ===
-    "BUY";
+  // ==========================================================
+  // EMBED COLOR
+  // ==========================================================
 
   const color =
-    isBuy
+    marketStructure ===
+    "Bullish"
       ? (
           CRT_CONFIG.colors?.buy ||
           "#57F287"
@@ -2526,20 +2466,9 @@ function createSignalEmbed(
           "#ED4245"
         );
 
-  const signalCandle =
-    candles?.find(
-      candle =>
-        Number(
-          candle.timestamp ??
-          candle.openTime
-        ) ===
-        Number(
-          signal.candleTimestamp
-        )
-    ) ||
-    candles?.[
-      signal.index
-    ];
+  // ==========================================================
+  // FIELDS
+  // ==========================================================
 
   const fields = [
     {
@@ -2559,30 +2488,6 @@ function createSignalEmbed(
 
       value:
         timeframe.toUpperCase(),
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "SIGNAL",
-
-      value:
-        isBuy
-          ? "🟢 BUY"
-          : "🔴 SELL",
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "FRACTAL",
-
-      value:
-        signal.fractalType,
 
       inline:
         true,
@@ -2631,27 +2536,12 @@ function createSignalEmbed(
         "MARKET STRUCTURE",
 
       value:
-        marketStructure ===
-        "Bullish"
-          ? "Bullish"
-          : "Bearish",
-
-      inline:
-        true,
-    },
-
-    {
-      name:
-        "CANDLE",
-
-      value:
-        formatCandle(
-          signalCandle,
-          timeframe
+        formatMarketStructure(
+          marketStructure
         ),
 
       inline:
-        false,
+        true,
     },
 
     {
@@ -2679,82 +2569,19 @@ function createSignalEmbed(
       inline:
         true,
     },
-
-    {
-      name:
-        "CONFIRMED",
-
-      value:
-        formatDateTime(
-          signal.timestamp
-        ),
-
-      inline:
-        false,
-    },
   ];
 
   // ==========================================================
-  // 5M TOP-DOWN
+  // CREATE EMBED
   // ==========================================================
-
-  if (
-    timeframe ===
-    LOWER_TIMEFRAME
-  ) {
-    fields.push(
-      {
-        name:
-          "TOP-DOWN",
-
-        value:
-          topDown
-            ? formatTopDownCount(
-                topDown
-              )
-            : "0/4 CONFIRMED",
-
-        inline:
-          true,
-      },
-
-      {
-        name:
-          "HTF CRT",
-
-        value:
-          topDown
-            ? formatHTFCRTDetails(
-                topDown
-              )
-            : "1D N/A • 4H N/A • 1H N/A • 15M N/A",
-
-        inline:
-          false,
-      },
-
-      {
-        name:
-          "ALIGNMENT",
-
-        value:
-          formatAlignment(
-            alignment
-          ),
-
-        inline:
-          false,
-      }
-    );
-  }
 
   return new EmbedBuilder()
     .setTitle(
-      `PDYN SIGNAL: ${symbol}`
+      `PDYN CRT CONFIRMATION: ${symbol}`
     )
 
     .setDescription(
-      "PDYN CRT Confirmation"
+      "Rachel T Fractal Confirmation"
     )
 
     .addFields(
@@ -2769,13 +2596,7 @@ function createSignalEmbed(
       text:
         CRT_CONFIG.footer ||
         "PDYN • MEXC Futures",
-    })
-
-    .setTimestamp(
-      new Date(
-        signal.timestamp
-      )
-    );
+    });
 }
 
 // ============================================================
@@ -2831,7 +2652,7 @@ async function sendCRTSignal(
     });
 
     console.log(
-      `[CRT] PDYN SIGNAL SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.type} | ${data.signal.fractalType}`
+      `[CRT] CRT CONFIRMATION SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.fractalType}`
     );
 
     return true;
@@ -2884,20 +2705,9 @@ function buildMarketAnalysis(
 }
 
 // ============================================================
-// GET HTF MARKET STRUCTURES
+// MARKET STRUCTURE STATE
 // ============================================================
 //
-// IMPORTANT:
-//
-// The 5M scanner does not need to refetch all HTF candles here.
-//
-// The scanner maintains this cache while processing each HTF.
-//
-// ============================================================
-
-const marketStructureState =
-  new Map();
-
 // key:
 //
 //   MEXC|BTC_USDT|15m
@@ -2906,6 +2716,13 @@ const marketStructureState =
 //
 //   Bullish / Bearish
 //
+// ============================================================
+
+const marketStructureState =
+  new Map();
+
+// ============================================================
+// SET MARKET STRUCTURE
 // ============================================================
 
 function setMarketStructureState(
@@ -2921,6 +2738,10 @@ function setMarketStructureState(
     structure
   );
 }
+
+// ============================================================
+// GET MARKET STRUCTURE
+// ============================================================
 
 function getMarketStructureState(
   symbol,
@@ -2938,21 +2759,14 @@ function getMarketStructureState(
 }
 
 // ============================================================
-// CHECK ALL HTF MARKET STRUCTURES
-// ============================================================
-//
-// If the in-memory market structure is not available, the
-// function returns null for that timeframe.
-//
-// This prevents the bot from pretending that an HTF is aligned
-// when its structure has never been calculated.
-//
+// GET HTF MARKET STRUCTURES
 // ============================================================
 
 function getHTFMarketStructures(
   symbol
 ) {
-  const result = {};
+  const result =
+    {};
 
   for (
     const timeframe of
@@ -3085,13 +2899,13 @@ async function processMarket(
   signal.volume =
     Number(
       fractalCandle.volume ||
-      0
+        0
     );
 
   signal.candleTimestamp =
     Number(
       fractalCandle.timestamp ??
-      fractalCandle.openTime
+        fractalCandle.openTime
     );
 
   signal.candleStart =
@@ -3263,7 +3077,7 @@ async function processMarket(
   }
 
   // ==========================================================
-  // SEND SIGNAL
+  // SEND CRT CONFIRMATION
   // ==========================================================
 
   await sendCRTSignal(
@@ -3674,7 +3488,7 @@ export function startCRTMonitor(
   );
 
   console.log(
-    "[CRT] PDYN CRT SIGNAL MONITOR STARTED"
+    "[CRT] PDYN CRT CONFIRMATION MONITOR STARTED"
   );
 
   console.log(
@@ -3719,6 +3533,18 @@ export function startCRTMonitor(
 
   console.log(
     "[CRT] Market Structure: BULLISH / BEARISH"
+  );
+
+  console.log(
+    "[CRT] Discord BUY/SELL text: HIDDEN"
+  );
+
+  console.log(
+    "[CRT] Candle information: HIDDEN"
+  );
+
+  console.log(
+    "[CRT] Confirmation timestamp: HIDDEN"
   );
 
   console.log(
@@ -3885,6 +3711,15 @@ export function getCRTMonitorStatus() {
     databasePersistence:
       "topDown.js",
 
+    discordSignalText:
+      false,
+
+    discordCandleInfo:
+      false,
+
+    discordConfirmationTime:
+      false,
+
     timezone:
       CRT_TIMEZONE,
   };
@@ -4041,6 +3876,27 @@ export function getCRTServiceInfo() {
     closedCandleConfirmation:
       true,
 
+    discordSignalText:
+      false,
+
+    discordCandleInfo:
+      false,
+
+    discordConfirmationTime:
+      false,
+
+    discordOutput:
+      [
+        "SOURCE",
+        "TIMEFRAME",
+        "RSI",
+        "VOLUME",
+        "STD DEV",
+        "MARKET STRUCTURE",
+        "PRICE",
+        "FRACTAL PRICE",
+      ],
+
     timezone:
       CRT_TIMEZONE,
 
@@ -4107,5 +3963,13 @@ console.log(
 );
 
 console.log(
-  "[CRT] PDYN SIGNAL output enabled."
+  "[CRT] BUY/SELL direction hidden from Discord output."
+);
+
+console.log(
+  "[CRT] Candle information hidden from Discord output."
+);
+
+console.log(
+  "[CRT] PDYN CRT CONFIRMATION output enabled."
 );
