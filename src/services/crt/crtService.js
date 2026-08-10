@@ -5,50 +5,30 @@ import botConfig from "../../config/bot.js";
 // PDYN CRT SIGNAL SERVICE
 // ============================================================
 //
-// DATA SOURCES
+// MEXC  = CRYPTO FUTURES
+// OANDA = FOREX / METALS
 //
-// CRYPTO:
-//   MEXC FUTURES ONLY
+// SIGNAL LOGIC:
+// Rachel T Fractals
 //
-// FOREX / METALS:
-//   OANDA
+// Filtered Top    = CRT SELL
+// Filtered Bottom = CRT BUY
 //
-// CRT LOGIC:
-//   Rachel T Fractals
+// RSI is INFORMATION ONLY.
+// RSI DOES NOT FILTER OR OVERRIDE CRT.
 //
-// ENABLED:
-//   Filtered Top Fractals
-//   Filtered Bottom Fractals
-//
-// filterBW:
-//   false
-//
-// Therefore:
-//   Filtered Top    = isBWFractal(1)
-//   Filtered Bottom = isBWFractal(-1)
+// RSI OUTPUT:
+// OVERBOUGHT
+// OVERSOLD
+// NEUTRAL
 //
 // TIMEFRAMES:
-//   5m
-//   15m
-//   30m
-//   1h
-//   4h
-//   1D
-//
-// RSI:
-//   14
-//
-// IMPORTANT:
-//   MEXC Futures API domain was changed from:
-//
-//   https://contract.mexc.com
-//
-//   to:
-//
-//   https://api.mexc.com
-//
-//   Do NOT use contract.mexc.com.
-//
+// 5m
+// 15m
+// 30m
+// 1h
+// 4h
+// 1d
 // ============================================================
 
 
@@ -75,17 +55,11 @@ const CRT_TIMEZONE =
 
 const TIMEFRAMES =
   CRT_CONFIG.timeframes || {
-
     "5m": 5,
-
     "15m": 15,
-
     "30m": 30,
-
     "1h": 60,
-
     "4h": 240,
-
     "1d": 1440,
   };
 
@@ -101,26 +75,13 @@ const CHANNELS =
 // ============================================================
 // MEXC FUTURES API
 // ============================================================
-//
-// IMPORTANT:
-//
-// DO NOT CHANGE THIS BACK TO:
-// https://contract.mexc.com
-//
-// MEXC officially moved Futures API access to:
-// https://api.mexc.com
-//
-// ============================================================
 
 const MEXC_BASE_URL =
   (
     process.env.MEXC_FUTURES_API_URL ||
     CRT_CONFIG.mexc?.api ||
     "https://api.mexc.com"
-  ).replace(
-    /\/+$/,
-    ""
-  );
+  ).replace(/\/+$/, "");
 
 
 // ============================================================
@@ -132,22 +93,18 @@ const OANDA_ENVIRONMENT =
   process.env.OANDA_ENVIRONMENT ||
   "live";
 
-
 const OANDA_API_KEY =
   CRT_CONFIG.oanda?.apiKey ||
   process.env.OANDA_API_KEY ||
   "";
-
 
 const OANDA_ACCOUNT_ID =
   CRT_CONFIG.oanda?.accountId ||
   process.env.OANDA_ACCOUNT_ID ||
   "";
 
-
 const OANDA_BASE_URL =
-  OANDA_ENVIRONMENT ===
-  "practice"
+  OANDA_ENVIRONMENT === "practice"
     ? "https://api-fxpractice.oanda.com"
     : "https://api-fxtrade.oanda.com";
 
@@ -157,49 +114,27 @@ const OANDA_BASE_URL =
 // ============================================================
 
 const RSI_PERIOD =
-  Number(
-    CRT_CONFIG.rsi?.period
-  ) ||
+  Number(CRT_CONFIG.rsi?.period) ||
   14;
 
-
 const RSI_OVERBOUGHT =
-  Number(
-    CRT_CONFIG.rsi?.overbought
-  ) ||
+  Number(CRT_CONFIG.rsi?.overbought) ||
   70;
 
-
 const RSI_OVERSOLD =
-  Number(
-    CRT_CONFIG.rsi?.oversold
-  ) ||
+  Number(CRT_CONFIG.rsi?.oversold) ||
   30;
 
 
 // ============================================================
 // RACHEL T FILTER SETTINGS
 // ============================================================
-//
-// The requested configuration is:
-//
-// Filtered Top Fractals     = ON
-// Filtered Bottom Fractals  = ON
-//
-// All other source settings
-// are intentionally ignored.
-//
-// filterBW = false
-//
-// ============================================================
 
 const FILTER_BW =
   false;
 
-
 const FILTERED_TOP_ENABLED =
   true;
-
 
 const FILTERED_BOTTOM_ENABLED =
   true;
@@ -212,35 +147,21 @@ const FILTERED_BOTTOM_ENABLED =
 const REQUEST_TIMEOUT =
   15000;
 
-
 const CANDLE_LIMIT =
   220;
 
-
 const CHECK_INTERVAL =
-  Number(
-    CRT_CONFIG.checkInterval
-  ) >= 1000
-    ? Number(
-        CRT_CONFIG.checkInterval
-      )
+  Number(CRT_CONFIG.checkInterval) >= 1000
+    ? Number(CRT_CONFIG.checkInterval)
     : 5000;
 
 
 // ============================================================
 // CONCURRENCY
 // ============================================================
-//
-// Keep this reasonably low.
-//
-// Do not hammer MEXC with hundreds of
-// simultaneous requests.
-//
-// ============================================================
 
 const MEXC_CONCURRENCY =
   4;
-
 
 const OANDA_CONCURRENCY =
   3;
@@ -253,45 +174,24 @@ const OANDA_CONCURRENCY =
 let mexcSymbolsCache =
   null;
 
-
 let mexcSymbolsCacheTime =
   0;
 
-
 const MEXC_SYMBOL_CACHE_TIME =
-  10 *
-  60 *
-  1000;
-
+  10 * 60 * 1000;
 
 let oandaInstrumentsCache =
   null;
 
-
 let oandaInstrumentsCacheTime =
   0;
 
-
 const OANDA_CACHE_TIME =
-  30 *
-  60 *
-  1000;
+  30 * 60 * 1000;
 
 
 // ============================================================
-// STATE
-// ============================================================
-//
-// key:
-//
-// MEXC|BTC_USDT|5m
-//
-// OANDA|XAU_USD|1h
-//
-// value:
-//
-// last processed fractal timestamp
-//
+// SIGNAL STATE
 // ============================================================
 
 const signalState =
@@ -300,11 +200,6 @@ const signalState =
 
 // ============================================================
 // STARTUP BASELINE
-// ============================================================
-//
-// Prevents Railway restart from immediately
-// repeating an old signal.
-//
 // ============================================================
 
 const startupBaseline =
@@ -318,27 +213,19 @@ const startupBaseline =
 let crtMonitorStarted =
   false;
 
-
 let monitorTimer =
   null;
 
 
 // ============================================================
-// TEMPORARY BLOCK STATE
-// ============================================================
-//
-// If MEXC returns 403, do not continuously
-// hammer the endpoint.
-//
+// MEXC BLOCK STATE
 // ============================================================
 
 let mexcBlockedUntil =
   0;
 
-
 const MEXC_BLOCK_COOLDOWN =
-  60 *
-  1000;
+  60 * 1000;
 
 
 // ============================================================
@@ -349,22 +236,16 @@ async function fetchJson(
   url,
   options = {}
 ) {
-
   const controller =
     new AbortController();
 
-
   const timeout =
     setTimeout(
-      () => {
-        controller.abort();
-      },
+      () => controller.abort(),
       REQUEST_TIMEOUT
     );
 
-
   try {
-
     const response =
       await fetch(
         url,
@@ -375,80 +256,55 @@ async function fetchJson(
             controller.signal,
 
           headers: {
-
             Accept:
               "application/json",
 
             "User-Agent":
               "PDYN-CRT-Bot/1.0",
 
-            ...(options.headers ||
-              {}),
+            ...(options.headers || {}),
           },
         }
       );
 
-
     const text =
       await response.text();
-
 
     let data =
       null;
 
-
     try {
-
       data =
         text
-          ? JSON.parse(
-              text
-            )
+          ? JSON.parse(text)
           : null;
-
     } catch {
-
-      data =
-        null;
+      data = null;
     }
 
-
-    if (
-      !response.ok
-    ) {
-
+    if (!response.ok) {
       const error =
         new Error(
           `HTTP ${response.status}: ${
             data?.msg ||
             data?.message ||
-            text.slice(
-              0,
-              250
-            )
+            text.slice(0, 250)
           }`
         );
-
 
       error.status =
         response.status;
 
-
       error.url =
         url;
-
 
       throw error;
     }
 
-
     return data;
 
   } finally {
-
-    clearTimeout(
-      timeout
-    );
+    clearTimeout(timeout);
   }
 }
 
@@ -460,33 +316,17 @@ async function fetchJson(
 function getMexcInterval(
   timeframe
 ) {
-
   const intervals = {
-
-    "5m":
-      "Min5",
-
-    "15m":
-      "Min15",
-
-    "30m":
-      "Min30",
-
-    "1h":
-      "Min60",
-
-    "4h":
-      "Hour4",
-
-    "1d":
-      "Day1",
+    "5m": "Min5",
+    "15m": "Min15",
+    "30m": "Min30",
+    "1h": "Min60",
+    "4h": "Hour4",
+    "1d": "Day1",
   };
 
-
   return (
-    intervals[
-      timeframe
-    ] ||
+    intervals[timeframe] ||
     "Min15"
   );
 }
@@ -499,33 +339,17 @@ function getMexcInterval(
 function getOandaGranularity(
   timeframe
 ) {
-
   const granularities = {
-
-    "5m":
-      "M5",
-
-    "15m":
-      "M15",
-
-    "30m":
-      "M30",
-
-    "1h":
-      "H1",
-
-    "4h":
-      "H4",
-
-    "1d":
-      "D",
+    "5m": "M5",
+    "15m": "M15",
+    "30m": "M30",
+    "1h": "H1",
+    "4h": "H4",
+    "1d": "D",
   };
 
-
   return (
-    granularities[
-      timeframe
-    ] ||
+    granularities[timeframe] ||
     "M15"
   );
 }
@@ -538,44 +362,33 @@ function getOandaGranularity(
 export function isValidCRTTimeframe(
   timeframe
 ) {
-
-  if (
-    !timeframe
-  ) {
-
+  if (!timeframe) {
     return false;
   }
 
-
   return Object.prototype.hasOwnProperty.call(
     TIMEFRAMES,
-    String(
-      timeframe
-    ).toLowerCase()
+    String(timeframe).toLowerCase()
   );
 }
 
 
 // ============================================================
-// GET AVAILABLE TIMEFRAMES
+// AVAILABLE TIMEFRAMES
 // ============================================================
 
 export function getAvailableCRTTimeframes() {
-
-  return Object.keys(
-    TIMEFRAMES
-  );
+  return Object.keys(TIMEFRAMES);
 }
 
 
 // ============================================================
-// GET ZONED PARTS
+// ZONED TIME
 // ============================================================
 
 function getZonedParts(
   date = new Date()
 ) {
-
   const formatter =
     new Intl.DateTimeFormat(
       "en-US",
@@ -583,69 +396,44 @@ function getZonedParts(
         timeZone:
           CRT_TIMEZONE,
 
-        year:
-          "numeric",
-
-        month:
-          "2-digit",
-
-        day:
-          "2-digit",
-
-        hour:
-          "2-digit",
-
-        minute:
-          "2-digit",
-
-        second:
-          "2-digit",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
 
         hourCycle:
           "h23",
       }
     );
 
-
   const parts =
-    formatter.formatToParts(
-      date
-    );
+    formatter.formatToParts(date);
 
-
-  const result =
-    {};
-
+  const result = {};
 
   for (
     const part of parts
   ) {
-
     if (
       part.type !==
       "literal"
     ) {
-
-      result[
-        part.type
-      ] =
-        Number(
-          part.value
-        );
+      result[part.type] =
+        Number(part.value);
     }
   }
-
 
   return result;
 }
 
 
 // ============================================================
-// GET CURRENT CRT TIME
+// CURRENT CRT TIME
 // ============================================================
 
 export function getCRTNow() {
-
   return getZonedParts(
     new Date()
   );
@@ -656,27 +444,19 @@ export function getCRTNow() {
 // PAD
 // ============================================================
 
-function pad(
-  value
-) {
-
-  return String(
-    value
-  ).padStart(
-    2,
-    "0"
-  );
+function pad(value) {
+  return String(value)
+    .padStart(2, "0");
 }
 
 
 // ============================================================
-// FORMAT DATE
+// DATE FORMAT
 // ============================================================
 
 function formatDateParts(
   parts
 ) {
-
   return (
     `${parts.year}-` +
     `${pad(parts.month)}-` +
@@ -686,14 +466,13 @@ function formatDateParts(
 
 
 // ============================================================
-// FORMAT TIME
+// TIME FORMAT
 // ============================================================
 
 function formatTimeParts(
   hour,
   minute
 ) {
-
   return (
     `${pad(hour)}:` +
     `${pad(minute)}`
@@ -702,7 +481,7 @@ function formatTimeParts(
 
 
 // ============================================================
-// FORMAT TIME WITH SECONDS
+// TIME FORMAT WITH SECONDS
 // ============================================================
 
 function formatTimeSeconds(
@@ -710,7 +489,6 @@ function formatTimeSeconds(
   minute,
   second
 ) {
-
   return (
     `${pad(hour)}:` +
     `${pad(minute)}:` +
@@ -726,42 +504,31 @@ function formatTimeSeconds(
 export function getCurrentCRT(
   timeframe = "15m"
 ) {
-
   timeframe =
-    String(
-      timeframe
-    ).toLowerCase();
-
+    String(timeframe)
+      .toLowerCase();
 
   if (
     !isValidCRTTimeframe(
       timeframe
     )
   ) {
-
     throw new Error(
       `Invalid CRT timeframe "${timeframe}".`
     );
   }
 
-
   const minutes =
     Number(
-      TIMEFRAMES[
-        timeframe
-      ]
+      TIMEFRAMES[timeframe]
     );
-
 
   const now =
     getCRTNow();
 
-
   if (
-    timeframe ===
-    "1d"
+    timeframe === "1d"
   ) {
-
     const startTimestamp =
       Date.UTC(
         now.year,
@@ -772,7 +539,6 @@ export function getCurrentCRT(
         0
       );
 
-
     const endTimestamp =
       startTimestamp +
       24 *
@@ -780,40 +546,24 @@ export function getCurrentCRT(
       60 *
       1000;
 
-
     return {
+      timeframe: "1d",
 
-      timeframe:
-        "1d",
-
-      label:
-        "DAILY",
+      label: "DAILY",
 
       date:
-        formatDateParts(
-          now
-        ),
+        formatDateParts(now),
 
-      startHour:
-        0,
+      startHour: 0,
+      startMinute: 0,
 
-      startMinute:
-        0,
+      endHour: 0,
+      endMinute: 0,
 
-      endHour:
-        0,
-
-      endMinute:
-        0,
-
-      startTime:
-        "00:00",
-
-      endTime:
-        "00:00",
+      startTime: "00:00",
+      endTime: "00:00",
 
       startTimestamp,
-
       endTimestamp,
 
       timezone:
@@ -821,20 +571,15 @@ export function getCurrentCRT(
     };
   }
 
-
   const totalMinutes =
-    now.hour *
-      60 +
+    now.hour * 60 +
     now.minute;
-
 
   const candleStartMinutes =
     Math.floor(
       totalMinutes /
       minutes
-    ) *
-    minutes;
-
+    ) * minutes;
 
   const startHour =
     Math.floor(
@@ -842,29 +587,23 @@ export function getCurrentCRT(
       60
     );
 
-
   const startMinute =
     candleStartMinutes %
     60;
-
 
   const endTotalMinutes =
     candleStartMinutes +
     minutes;
 
-
   const endHour =
     Math.floor(
       endTotalMinutes /
       60
-    ) %
-    24;
-
+    ) % 24;
 
   const endMinute =
     endTotalMinutes %
     60;
-
 
   const startTimestamp =
     Date.UTC(
@@ -876,32 +615,25 @@ export function getCurrentCRT(
       0
     );
 
-
   const endTimestamp =
     startTimestamp +
     minutes *
     60 *
     1000;
 
-
   return {
-
     timeframe,
 
     label:
       timeframe.toUpperCase(),
 
     date:
-      formatDateParts(
-        now
-      ),
+      formatDateParts(now),
 
     startHour,
-
     startMinute,
 
     endHour,
-
     endMinute,
 
     startTime:
@@ -917,7 +649,6 @@ export function getCurrentCRT(
       ),
 
     startTimestamp,
-
     endTimestamp,
 
     timezone:
@@ -933,67 +664,42 @@ export function getCurrentCRT(
 export function getRemainingTime(
   timeframe = "15m"
 ) {
-
   const crt =
     getCurrentCRT(
       timeframe
     );
 
-
   const remaining =
     Math.max(
       0,
       crt.endTimestamp -
-        Date.now()
+      Date.now()
     );
-
 
   const totalSeconds =
     Math.floor(
-      remaining /
-      1000
+      remaining / 1000
     );
-
 
   const hours =
     Math.floor(
-      totalSeconds /
-      3600
+      totalSeconds / 3600
     );
-
 
   const minutes =
     Math.floor(
-      (
-        totalSeconds %
-        3600
-      ) /
+      (totalSeconds % 3600) /
       60
     );
 
-
   const seconds =
-    totalSeconds %
-    60;
-
+    totalSeconds % 60;
 
   return [
-
-    pad(
-      hours
-    ),
-
-    pad(
-      minutes
-    ),
-
-    pad(
-      seconds
-    ),
-
-  ].join(
-    ":"
-  );
+    pad(hours),
+    pad(minutes),
+    pad(seconds),
+  ].join(":");
 }
 
 
@@ -1004,19 +710,15 @@ export function getRemainingTime(
 export function getCRTStatus(
   timeframe = "15m"
 ) {
-
   const crt =
     getCurrentCRT(
       timeframe
     );
 
-
   const now =
     getCRTNow();
 
-
   return {
-
     timeframe:
       crt.timeframe,
 
@@ -1063,10 +765,8 @@ export function getCRTStatus(
 function normalizeMexcSymbol(
   symbol
 ) {
-
   return String(
-    symbol ||
-    ""
+    symbol || ""
   )
     .trim()
     .toUpperCase();
@@ -1076,20 +776,10 @@ function normalizeMexcSymbol(
 // ============================================================
 // GET MEXC FUTURES SYMBOLS
 // ============================================================
-//
-// IMPORTANT:
-//
-// This is FUTURES.
-//
-// No Spot API is used.
-//
-// ============================================================
 
 async function getMexcFuturesSymbols() {
-
   const now =
     Date.now();
-
 
   if (
     mexcSymbolsCache &&
@@ -1097,42 +787,27 @@ async function getMexcFuturesSymbols() {
       mexcSymbolsCacheTime <
       MEXC_SYMBOL_CACHE_TIME
   ) {
-
     return mexcSymbolsCache;
   }
-
 
   if (
     now <
     mexcBlockedUntil
   ) {
-
     console.warn(
-      "[CRT] MEXC temporarily paused after access denial."
+      "[CRT] MEXC temporarily paused."
     );
-
 
     return [];
   }
-
 
   const url =
     `${MEXC_BASE_URL}` +
     `/api/v1/contract/detail`;
 
-
-  console.log(
-    `[CRT] MEXC Futures contracts: ${url}`
-  );
-
-
   try {
-
     const response =
-      await fetchJson(
-        url
-      );
-
+      await fetchJson(url);
 
     const contracts =
       Array.isArray(
@@ -1141,117 +816,74 @@ async function getMexcFuturesSymbols() {
         ? response.data
         : [];
 
-
     const symbols =
       contracts
-
         .filter(
-          (contract) => {
-
+          contract => {
             const symbol =
               normalizeMexcSymbol(
                 contract?.symbol
               );
 
-
             const quoteCoin =
               String(
                 contract?.quoteCoin ||
                 ""
-              )
-                .toUpperCase();
-
+              ).toUpperCase();
 
             const settleCoin =
               String(
                 contract?.settleCoin ||
                 ""
-              )
-                .toUpperCase();
-
+              ).toUpperCase();
 
             const isUSDT =
-              quoteCoin ===
-                "USDT" ||
-              settleCoin ===
-                "USDT" ||
-              symbol.endsWith(
-                "_USDT"
-              ) ||
-              symbol.endsWith(
-                "USDT"
-              );
-
+              quoteCoin === "USDT" ||
+              settleCoin === "USDT" ||
+              symbol.endsWith("_USDT") ||
+              symbol.endsWith("USDT");
 
             return (
-              Boolean(
-                symbol
-              ) &&
+              Boolean(symbol) &&
               isUSDT
             );
           }
         )
-
         .map(
-          (
-            contract
-          ) =>
+          contract =>
             normalizeMexcSymbol(
               contract.symbol
             )
         )
-
-        .filter(
-          Boolean
-        );
-
+        .filter(Boolean);
 
     mexcSymbolsCache =
       [
-        ...new Set(
-          symbols
-        ),
+        ...new Set(symbols),
       ];
-
 
     mexcSymbolsCacheTime =
       now;
-
 
     console.log(
       `[CRT] MEXC Futures contracts loaded: ${mexcSymbolsCache.length}`
     );
 
-
     return mexcSymbolsCache;
 
-  } catch (
-    error
-  ) {
-
+  } catch (error) {
     if (
-      error.status ===
-        403 ||
-      error.status ===
-        401
+      error.status === 403 ||
+      error.status === 401
     ) {
-
       mexcBlockedUntil =
         Date.now() +
         MEXC_BLOCK_COOLDOWN;
 
-
       console.error(
-        `[CRT] MEXC access denied (${error.status}). ` +
-        `Pausing MEXC requests for 60 seconds.`
-      );
-
-
-      console.error(
-        `[CRT] Verify Railway outbound access and MEXC API availability.`
+        `[CRT] MEXC access denied (${error.status}).`
       );
     }
-
 
     throw error;
   }
@@ -1259,48 +891,33 @@ async function getMexcFuturesSymbols() {
 
 
 // ============================================================
-// MEXC KLINE
-// ============================================================
-//
-// Correct current MEXC Futures API:
-//
-// https://api.mexc.com/api/v1/contract/kline/{symbol}
-//
+// MEXC CANDLES
 // ============================================================
 
 async function fetchMexcCandles(
   symbol,
   timeframe
 ) {
-
   if (
     Date.now() <
     mexcBlockedUntil
   ) {
-
     return [];
   }
-
 
   const normalizedSymbol =
     normalizeMexcSymbol(
       symbol
     );
 
-
-  if (
-    !normalizedSymbol
-  ) {
-
+  if (!normalizedSymbol) {
     return [];
   }
-
 
   const interval =
     getMexcInterval(
       timeframe
     );
-
 
   const url =
     `${MEXC_BASE_URL}` +
@@ -1313,73 +930,43 @@ async function fetchMexcCandles(
     )}` +
     `&limit=${CANDLE_LIMIT}`;
 
-
   try {
-
     const response =
-      await fetchJson(
-        url
-      );
-
+      await fetchJson(url);
 
     return parseMexcKlineResponse(
       response
     );
 
-  } catch (
-    error
-  ) {
-
+  } catch (error) {
     if (
-      error.status ===
-        403 ||
-      error.status ===
-        401
+      error.status === 403 ||
+      error.status === 401
     ) {
-
       mexcBlockedUntil =
         Date.now() +
         MEXC_BLOCK_COOLDOWN;
-
 
       console.error(
         `[CRT] MEXC access denied for ${normalizedSymbol}.`
       );
 
-
-      console.error(
-        `[CRT] URL: ${url}`
-      );
-
-
-      console.error(
-        `[CRT] MEXC requests paused for 60 seconds.`
-      );
-
-
       return [];
     }
-
 
     if (
-      error.status ===
-      429
+      error.status === 429
     ) {
-
       mexcBlockedUntil =
         Date.now() +
-        30 *
-        1000;
-
+        30000;
 
       console.warn(
-        `[CRT] MEXC rate limited. Pausing for 30 seconds.`
+        "[CRT] MEXC rate limited."
       );
-
 
       return [];
     }
-
 
     throw error;
   }
@@ -1393,241 +980,138 @@ async function fetchMexcCandles(
 function parseMexcKlineResponse(
   response
 ) {
-
   const data =
     response?.data;
 
-
-  if (
-    !data
-  ) {
-
+  if (!data) {
     return [];
   }
 
-
-  // ----------------------------------------------------------
-  // FORMAT 1
-  //
-  // {
-  //   time: [],
-  //   open: [],
-  //   close: [],
-  //   high: [],
-  //   low: [],
-  //   vol: []
-  // }
-  //
-  // ----------------------------------------------------------
-
   if (
-    !Array.isArray(
-      data
-    ) &&
-    Array.isArray(
-      data.time
-    )
+    !Array.isArray(data) &&
+    Array.isArray(data.time)
   ) {
-
-    const candles =
-      [];
-
+    const candles = [];
 
     for (
       let i = 0;
-      i <
-      data.time.length;
+      i < data.time.length;
       i++
     ) {
-
-      const timestamp =
-        normalizeTimestamp(
-          data.time[i]
-        );
-
-
       const candle = {
-
-        timestamp,
+        timestamp:
+          normalizeTimestamp(
+            data.time[i]
+          ),
 
         open:
           Number(
-            data.open?.[
-              i
-            ]
+            data.open?.[i]
           ),
 
         high:
           Number(
-            data.high?.[
-              i
-            ]
+            data.high?.[i]
           ),
 
         low:
           Number(
-            data.low?.[
-              i
-            ]
+            data.low?.[i]
           ),
 
         close:
           Number(
-            data.close?.[
-              i
-            ]
+            data.close?.[i]
           ),
 
         volume:
           Number(
-            data.vol?.[
-              i
-            ] ||
-            data.volume?.[
-              i
-            ] ||
+            data.vol?.[i] ||
+            data.volume?.[i] ||
             0
           ),
       };
-
 
       if (
         isValidCandle(
           candle
         )
       ) {
-
-        candles.push(
-          candle
-        );
+        candles.push(candle);
       }
     }
 
-
     return candles.sort(
-      (
-        a,
-        b
-      ) =>
+      (a, b) =>
         a.timestamp -
         b.timestamp
     );
   }
 
-
-  // ----------------------------------------------------------
-  // FORMAT 2
-  //
-  // [[time, open, close, high, low, volume]]
-  //
-  // ----------------------------------------------------------
-
   if (
-    Array.isArray(
-      data
-    )
+    Array.isArray(data)
   ) {
-
     return data
-
-      .map(
-        (
-          row
-        ) => {
-
-          if (
-            Array.isArray(
-              row
-            )
-          ) {
-
-            return {
-
-              timestamp:
-                normalizeTimestamp(
-                  row[0]
-                ),
-
-              open:
-                Number(
-                  row[1]
-                ),
-
-              close:
-                Number(
-                  row[2]
-                ),
-
-              high:
-                Number(
-                  row[3]
-                ),
-
-              low:
-                Number(
-                  row[4]
-                ),
-
-              volume:
-                Number(
-                  row[5] ||
-                  0
-                ),
-            };
-          }
-
-
+      .map(row => {
+        if (
+          Array.isArray(row)
+        ) {
           return {
-
             timestamp:
               normalizeTimestamp(
-                row?.time
+                row[0]
               ),
 
             open:
-              Number(
-                row?.open
-              ),
-
-            high:
-              Number(
-                row?.high
-              ),
-
-            low:
-              Number(
-                row?.low
-              ),
+              Number(row[1]),
 
             close:
-              Number(
-                row?.close
-              ),
+              Number(row[2]),
+
+            high:
+              Number(row[3]),
+
+            low:
+              Number(row[4]),
 
             volume:
-              Number(
-                row?.vol ||
-                row?.volume ||
-                0
-              ),
+              Number(row[5] || 0),
           };
         }
-      )
 
-      .filter(
-        isValidCandle
-      )
+        return {
+          timestamp:
+            normalizeTimestamp(
+              row?.time
+            ),
 
+          open:
+            Number(row?.open),
+
+          high:
+            Number(row?.high),
+
+          low:
+            Number(row?.low),
+
+          close:
+            Number(row?.close),
+
+          volume:
+            Number(
+              row?.vol ||
+              row?.volume ||
+              0
+            ),
+        };
+      })
+      .filter(isValidCandle)
       .sort(
-        (
-          a,
-          b
-        ) =>
+        (a, b) =>
           a.timestamp -
           b.timestamp
       );
   }
-
 
   return [];
 }
@@ -1640,35 +1124,22 @@ function parseMexcKlineResponse(
 function normalizeTimestamp(
   value
 ) {
-
   const number =
-    Number(
-      value
-    );
-
+    Number(value);
 
   if (
-    !Number.isFinite(
-      number
-    )
+    !Number.isFinite(number)
   ) {
-
     return NaN;
   }
 
-
-  // Seconds
   if (
     number <
     100000000000
   ) {
-
-    return number *
-      1000;
+    return number * 1000;
   }
 
-
-  // Milliseconds
   return number;
 }
 
@@ -1678,9 +1149,7 @@ function normalizeTimestamp(
 // ============================================================
 
 function getOandaHeaders() {
-
   return {
-
     Authorization:
       `Bearer ${OANDA_API_KEY}`,
 
@@ -1691,28 +1160,23 @@ function getOandaHeaders() {
 
 
 // ============================================================
-// GET OANDA INSTRUMENTS
+// OANDA INSTRUMENTS
 // ============================================================
 
 async function getOandaInstruments() {
-
   if (
     !OANDA_API_KEY ||
     !OANDA_ACCOUNT_ID
   ) {
-
     console.warn(
       "[CRT] OANDA credentials are missing."
     );
 
-
     return [];
   }
 
-
   const now =
     Date.now();
-
 
   if (
     oandaInstrumentsCache &&
@@ -1720,10 +1184,8 @@ async function getOandaInstruments() {
       oandaInstrumentsCacheTime <
       OANDA_CACHE_TIME
   ) {
-
     return oandaInstrumentsCache;
   }
-
 
   const url =
     `${OANDA_BASE_URL}` +
@@ -1733,9 +1195,7 @@ async function getOandaInstruments() {
     )}` +
     `/instruments`;
 
-
   try {
-
     const response =
       await fetchJson(
         url,
@@ -1745,7 +1205,6 @@ async function getOandaInstruments() {
         }
       );
 
-
     const instruments =
       Array.isArray(
         response?.instruments
@@ -1753,42 +1212,28 @@ async function getOandaInstruments() {
         ? response.instruments
         : [];
 
-
     oandaInstrumentsCache =
       instruments
-
         .map(
-          (
-            instrument
-          ) =>
+          instrument =>
             instrument.name
         )
-
-        .filter(
-          Boolean
-        );
-
+        .filter(Boolean);
 
     oandaInstrumentsCacheTime =
       now;
-
 
     console.log(
       `[CRT] OANDA instruments loaded: ${oandaInstrumentsCache.length}`
     );
 
-
     return oandaInstrumentsCache;
 
-  } catch (
-    error
-  ) {
-
+  } catch (error) {
     console.error(
       "[CRT] OANDA instruments error:",
       error.message
     );
-
 
     return [];
   }
@@ -1803,21 +1248,17 @@ async function fetchOandaCandles(
   instrument,
   timeframe
 ) {
-
   if (
     !OANDA_API_KEY ||
     !OANDA_ACCOUNT_ID
   ) {
-
     return [];
   }
-
 
   const granularity =
     getOandaGranularity(
       timeframe
     );
-
 
   const url =
     `${OANDA_BASE_URL}` +
@@ -1830,7 +1271,6 @@ async function fetchOandaCandles(
     `&count=${CANDLE_LIMIT}` +
     `&price=M`;
 
-
   const response =
     await fetchJson(
       url,
@@ -1840,7 +1280,6 @@ async function fetchOandaCandles(
       }
     );
 
-
   const candles =
     Array.isArray(
       response?.candles
@@ -1848,72 +1287,42 @@ async function fetchOandaCandles(
       ? response.candles
       : [];
 
-
   return candles
-
     .filter(
-      (
-        candle
-      ) =>
-        candle.complete ===
-        true
+      candle =>
+        candle.complete === true
     )
+    .map(candle => {
+      const mid =
+        candle.mid || {};
 
-    .map(
-      (
-        candle
-      ) => {
+      return {
+        timestamp:
+          new Date(
+            candle.time
+          ).getTime(),
 
-        const mid =
-          candle.mid ||
-          {};
+        open:
+          Number(mid.o),
 
+        high:
+          Number(mid.h),
 
-        return {
+        low:
+          Number(mid.l),
 
-          timestamp:
-            new Date(
-              candle.time
-            ).getTime(),
+        close:
+          Number(mid.c),
 
-          open:
-            Number(
-              mid.o
-            ),
-
-          high:
-            Number(
-              mid.h
-            ),
-
-          low:
-            Number(
-              mid.l
-            ),
-
-          close:
-            Number(
-              mid.c
-            ),
-
-          volume:
-            Number(
-              candle.volume ||
-              0
-            ),
-        };
-      }
-    )
-
-    .filter(
-      isValidCandle
-    )
-
+        volume:
+          Number(
+            candle.volume || 0
+          ),
+      };
+    })
+    .filter(isValidCandle)
     .sort(
-      (
-        a,
-        b
-      ) =>
+      (a, b) =>
         a.timestamp -
         b.timestamp
     );
@@ -1927,27 +1336,20 @@ async function fetchOandaCandles(
 function isValidCandle(
   candle
 ) {
-
   return (
-
     candle &&
-
     Number.isFinite(
       candle.timestamp
     ) &&
-
     Number.isFinite(
       candle.open
     ) &&
-
     Number.isFinite(
       candle.high
     ) &&
-
     Number.isFinite(
       candle.low
     ) &&
-
     Number.isFinite(
       candle.close
     )
@@ -1963,355 +1365,210 @@ export function calculateRSI(
   candles,
   period = RSI_PERIOD
 ) {
-
   if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <=
-      period
+    !Array.isArray(candles) ||
+    candles.length <= period
   ) {
-
     return null;
   }
 
-
   const closes =
     candles.map(
-      (
-        candle
-      ) =>
+      candle =>
         Number(
           candle.close
         )
     );
 
-
-  let gains =
-    0;
-
-
-  let losses =
-    0;
-
+  let gains = 0;
+  let losses = 0;
 
   for (
     let i = 1;
     i <= period;
     i++
   ) {
-
     const change =
       closes[i] -
       closes[i - 1];
 
-
     if (
-      change >
-      0
+      change > 0
     ) {
-
-      gains +=
-        change;
-
+      gains += change;
     } else {
-
       losses +=
-        Math.abs(
-          change
-        );
+        Math.abs(change);
     }
   }
 
-
   let averageGain =
-    gains /
-    period;
-
+    gains / period;
 
   let averageLoss =
-    losses /
-    period;
-
+    losses / period;
 
   for (
-    let i =
-      period + 1;
-    i <
-    closes.length;
+    let i = period + 1;
+    i < closes.length;
     i++
   ) {
-
     const change =
       closes[i] -
       closes[i - 1];
 
-
     const gain =
-      change >
-      0
+      change > 0
         ? change
         : 0;
 
-
     const loss =
-      change <
-      0
-        ? Math.abs(
-            change
-          )
+      change < 0
+        ? Math.abs(change)
         : 0;
-
 
     averageGain =
       (
         averageGain *
-          (
-            period -
-            1
-          ) +
+          (period - 1) +
         gain
-      ) /
-      period;
-
+      ) / period;
 
     averageLoss =
       (
         averageLoss *
-          (
-            period -
-            1
-          ) +
+          (period - 1) +
         loss
-      ) /
-      period;
+      ) / period;
   }
 
-
   if (
-    averageLoss ===
-    0
+    averageLoss === 0
   ) {
-
     return 100;
   }
 
-
   if (
-    averageGain ===
-    0
+    averageGain === 0
   ) {
-
     return 0;
   }
-
 
   const rs =
     averageGain /
     averageLoss;
 
-
   return (
     100 -
-    (
-      100 /
-      (
-        1 +
-        rs
-      )
-    )
+    100 /
+      (1 + rs)
   );
 }
 
 
 // ============================================================
-// RSI STATUS
+// RSI STATE
 // ============================================================
 
 function getRSIState(
   rsi
 ) {
-
   if (
-    !Number.isFinite(
-      rsi
-    )
+    !Number.isFinite(rsi)
   ) {
-
-    return "N/A";
+    return "NEUTRAL";
   }
 
-
   if (
-    rsi >=
-    RSI_OVERBOUGHT
+    rsi >= RSI_OVERBOUGHT
   ) {
-
     return "OVERBOUGHT";
   }
 
-
   if (
-    rsi <=
-    RSI_OVERSOLD
+    rsi <= RSI_OVERSOLD
   ) {
-
     return "OVERSOLD";
   }
-
 
   return "NEUTRAL";
 }
 
 
 // ============================================================
-// RACHEL T — BW TOP FRACTAL
-// ============================================================
-//
-// isBWFractal(1)
-//
-// high[4] < high[2]
-// high[3] <= high[2]
-// high[2] >= high[1]
-// high[2] > high[0]
-//
+// RACHEL T TOP FRACTAL
 // ============================================================
 
 function isBWTop(
   candles,
   index
 ) {
-
   if (
-    index <
-      4 ||
-    index >=
-      candles.length
+    index < 4 ||
+    index >= candles.length
   ) {
-
     return false;
   }
 
-
   const c4 =
-    candles[
-      index - 4
-    ];
-
+    candles[index - 4];
 
   const c3 =
-    candles[
-      index - 3
-    ];
-
+    candles[index - 3];
 
   const c2 =
-    candles[
-      index - 2
-    ];
-
+    candles[index - 2];
 
   const c1 =
-    candles[
-      index - 1
-    ];
-
+    candles[index - 1];
 
   const c0 =
-    candles[
-      index
-    ];
-
+    candles[index];
 
   return (
-
-    c4.high <
-      c2.high &&
-
-    c3.high <=
-      c2.high &&
-
-    c2.high >=
-      c1.high &&
-
-    c2.high >
-      c0.high
+    c4.high < c2.high &&
+    c3.high <= c2.high &&
+    c2.high >= c1.high &&
+    c2.high > c0.high
   );
 }
 
 
 // ============================================================
-// RACHEL T — BW BOTTOM FRACTAL
-// ============================================================
-//
-// isBWFractal(-1)
-//
-// low[4] > low[2]
-// low[3] >= low[2]
-// low[2] <= low[1]
-// low[2] < low[0]
-//
+// RACHEL T BOTTOM FRACTAL
 // ============================================================
 
 function isBWBottom(
   candles,
   index
 ) {
-
   if (
-    index <
-      4 ||
-    index >=
-      candles.length
+    index < 4 ||
+    index >= candles.length
   ) {
-
     return false;
   }
 
-
   const c4 =
-    candles[
-      index - 4
-    ];
-
+    candles[index - 4];
 
   const c3 =
-    candles[
-      index - 3
-    ];
-
+    candles[index - 3];
 
   const c2 =
-    candles[
-      index - 2
-    ];
-
+    candles[index - 2];
 
   const c1 =
-    candles[
-      index - 1
-    ];
-
+    candles[index - 1];
 
   const c0 =
-    candles[
-      index
-    ];
-
+    candles[index];
 
   return (
-
-    c4.low >
-      c2.low &&
-
-    c3.low >=
-      c2.low &&
-
-    c2.low <=
-      c1.low &&
-
-    c2.low <
-      c0.low
+    c4.low > c2.low &&
+    c3.low >= c2.low &&
+    c2.low <= c1.low &&
+    c2.low < c0.low
   );
 }
 
@@ -2324,14 +1581,9 @@ function isFilteredTop(
   candles,
   index
 ) {
-
-  if (
-    FILTER_BW
-  ) {
-
+  if (FILTER_BW) {
     return false;
   }
-
 
   return isBWTop(
     candles,
@@ -2348,14 +1600,9 @@ function isFilteredBottom(
   candles,
   index
 ) {
-
-  if (
-    FILTER_BW
-  ) {
-
+  if (FILTER_BW) {
     return false;
   }
-
 
   return isBWBottom(
     candles,
@@ -2371,39 +1618,27 @@ function isFilteredBottom(
 function findLastFilteredFractal(
   candles
 ) {
-
   if (
-    candles.length <
-    5
+    candles.length < 5
   ) {
-
     return null;
   }
 
-
   const lastIndex =
-    candles.length -
-    1;
-
+    candles.length - 1;
 
   for (
-    let index =
-      lastIndex;
-    index >=
-      4;
+    let index = lastIndex;
+    index >= 4;
     index--
   ) {
-
     const fractalIndex =
-      index -
-      2;
-
+      index - 2;
 
     const candle =
       candles[
         fractalIndex
       ];
-
 
     if (
       FILTERED_TOP_ENABLED &&
@@ -2412,14 +1647,10 @@ function findLastFilteredFractal(
         index
       )
     ) {
-
       return {
+        type: "SELL",
 
-        type:
-          "SELL",
-
-        fractalType:
-          "TOP",
+        fractalType: "TOP",
 
         index:
           fractalIndex,
@@ -2435,7 +1666,6 @@ function findLastFilteredFractal(
       };
     }
 
-
     if (
       FILTERED_BOTTOM_ENABLED &&
       isFilteredBottom(
@@ -2443,11 +1673,8 @@ function findLastFilteredFractal(
         index
       )
     ) {
-
       return {
-
-        type:
-          "BUY",
+        type: "BUY",
 
         fractalType:
           "BOTTOM",
@@ -2466,7 +1693,6 @@ function findLastFilteredFractal(
       };
     }
   }
-
 
   return null;
 }
@@ -2480,48 +1706,34 @@ function findNewestFractalAfter(
   candles,
   timestamp
 ) {
-
   if (
-    candles.length <
-    5
+    candles.length < 5
   ) {
-
     return null;
   }
 
-
   const lastIndex =
-    candles.length -
-    1;
-
+    candles.length - 1;
 
   for (
-    let index =
-      lastIndex;
-    index >=
-      4;
+    let index = lastIndex;
+    index >= 4;
     index--
   ) {
-
     const fractalIndex =
-      index -
-      2;
-
+      index - 2;
 
     const candle =
       candles[
         fractalIndex
       ];
 
-
     if (
       candle.timestamp <=
       timestamp
     ) {
-
       break;
     }
-
 
     if (
       FILTERED_TOP_ENABLED &&
@@ -2530,11 +1742,8 @@ function findNewestFractalAfter(
         index
       )
     ) {
-
       return {
-
-        type:
-          "SELL",
+        type: "SELL",
 
         fractalType:
           "TOP",
@@ -2553,7 +1762,6 @@ function findNewestFractalAfter(
       };
     }
 
-
     if (
       FILTERED_BOTTOM_ENABLED &&
       isFilteredBottom(
@@ -2561,11 +1769,8 @@ function findNewestFractalAfter(
         index
       )
     ) {
-
       return {
-
-        type:
-          "BUY",
+        type: "BUY",
 
         fractalType:
           "BOTTOM",
@@ -2584,7 +1789,6 @@ function findNewestFractalAfter(
       };
     }
   }
-
 
   return null;
 }
@@ -2601,18 +1805,12 @@ async function processMarket(
   timeframe,
   candles
 ) {
-
   if (
-    !Array.isArray(
-      candles
-    ) ||
-    candles.length <
-      20
+    !Array.isArray(candles) ||
+    candles.length < 20
   ) {
-
     return;
   }
-
 
   const rsi =
     calculateRSI(
@@ -2620,232 +1818,86 @@ async function processMarket(
       RSI_PERIOD
     );
 
-
   const rsiState =
-    getRSIState(
-      rsi
-    );
-
+    getRSIState(rsi);
 
   const stateKey =
     `${provider}|${symbol}|${timeframe}`;
-
 
   const previousTimestamp =
     signalState.get(
       stateKey
     );
 
-
   let signal;
-
 
   if (
     Number.isFinite(
       previousTimestamp
     )
   ) {
-
     signal =
       findNewestFractalAfter(
         candles,
         previousTimestamp
       );
-
   } else {
-
     signal =
       findLastFilteredFractal(
         candles
       );
   }
 
-
-  if (
-    !signal
-  ) {
-
+  if (!signal) {
     return;
   }
-
-
-  // ----------------------------------------------------------
-  // FIRST SCAN AFTER RAILWAY RESTART
-  //
-  // Register the latest known fractal.
-  //
-  // Do not send an old signal.
-  //
-  // ----------------------------------------------------------
 
   if (
     !startupBaseline.has(
       stateKey
     )
   ) {
-
     signalState.set(
       stateKey,
       signal.timestamp
     );
 
-
     startupBaseline.add(
       stateKey
     );
-
 
     console.log(
       `[CRT] Baseline | ${provider} | ${symbol} | ${timeframe} | ${signal.fractalType}`
     );
 
-
     return;
   }
-
-
-  // ----------------------------------------------------------
-  // DUPLICATE PROTECTION
-  // ----------------------------------------------------------
 
   if (
     signal.timestamp <=
     (
       signalState.get(
         stateKey
-      ) ||
-      0
+      ) || 0
     )
   ) {
-
     return;
   }
-
-
-  // ----------------------------------------------------------
-  // SAVE BEFORE SEND
-  // ----------------------------------------------------------
 
   signalState.set(
     stateKey,
     signal.timestamp
   );
 
-
-  // ----------------------------------------------------------
-  // SEND
-  // ----------------------------------------------------------
-
   await sendCRTSignal(
     client,
     {
       provider,
-
       symbol,
-
       timeframe,
-
       signal,
-
-      rsi,
-
       rsiState,
     }
-  );
-}
-
-
-// ============================================================
-// FORMAT PRICE
-// ============================================================
-
-function formatPrice(
-  price
-) {
-
-  if (
-    !Number.isFinite(
-      price
-    )
-  ) {
-
-    return "N/A";
-  }
-
-
-  if (
-    Math.abs(
-      price
-    ) >=
-    1000
-  ) {
-
-    return price.toLocaleString(
-      "en-US",
-      {
-        minimumFractionDigits:
-          2,
-
-        maximumFractionDigits:
-          2,
-      }
-    );
-  }
-
-
-  if (
-    Math.abs(
-      price
-    ) >=
-    1
-  ) {
-
-    return price.toLocaleString(
-      "en-US",
-      {
-        minimumFractionDigits:
-          2,
-
-        maximumFractionDigits:
-          5,
-      }
-    );
-  }
-
-
-  return price.toLocaleString(
-    "en-US",
-    {
-      minimumFractionDigits:
-        4,
-
-      maximumFractionDigits:
-        8,
-    }
-  );
-}
-
-
-// ============================================================
-// FORMAT RSI
-// ============================================================
-
-function formatRSI(
-  rsi
-) {
-
-  if (
-    !Number.isFinite(
-      rsi
-    )
-  ) {
-
-    return "N/A";
-  }
-
-
-  return rsi.toFixed(
-    2
   );
 }
 
@@ -2857,7 +1909,6 @@ function formatRSI(
 function formatSignalTime(
   timestamp
 ) {
-
   return new Intl.DateTimeFormat(
     "en-US",
     {
@@ -2883,9 +1934,7 @@ function formatSignalTime(
         "h23",
     }
   ).format(
-    new Date(
-      timestamp
-    )
+    new Date(timestamp)
   );
 }
 
@@ -2893,58 +1942,56 @@ function formatSignalTime(
 // ============================================================
 // CREATE DISCORD EMBED
 // ============================================================
+//
+// IMPORTANT OUTPUT:
+//
+// CRT: BUY
+// CRT: SELL
+//
+// RSI:
+// OVERBOUGHT
+// OVERSOLD
+// NEUTRAL
+//
+// No RSI number.
+// No SIGNAL BUY/SELL field.
+// No "Fractal: Filtered Top/Bottom".
+// ============================================================
 
 function createSignalEmbed(
   data
 ) {
-
   const {
-
     provider,
-
     symbol,
-
     timeframe,
-
     signal,
-
-    rsi,
-
     rsiState,
-
-  } =
-    data;
-
+  } = data;
 
   const isBuy =
-    signal.type ===
-    "BUY";
-
-
-  const title =
-    isBuy
-      ? "🟢 CRT BUY SIGNAL"
-      : "🔴 CRT SELL SIGNAL";
-
+    signal.type === "BUY";
 
   const color =
     isBuy
       ? (
-          CRT_CONFIG.colors
-            ?.buy ||
+          CRT_CONFIG.colors?.buy ||
           "#57F287"
         )
       : (
-          CRT_CONFIG.colors
-            ?.sell ||
+          CRT_CONFIG.colors?.sell ||
           "#ED4245"
         );
 
+  const providerLabel =
+    provider === "MEXC"
+      ? "MEXC"
+      : "OANDA";
 
   return new EmbedBuilder()
 
     .setTitle(
-      title
+      "📊 CRT SIGNAL"
     )
 
     .setDescription(
@@ -2952,6 +1999,17 @@ function createSignalEmbed(
     )
 
     .addFields(
+
+      {
+        name:
+          "SOURCE",
+
+        value:
+          `\`${providerLabel}\``,
+
+        inline:
+          true,
+      },
 
       {
         name:
@@ -2966,12 +2024,10 @@ function createSignalEmbed(
 
       {
         name:
-          "SIGNAL PRICE",
+          "CRT",
 
         value:
-          `\`${formatPrice(
-            signal.price
-          )}\``,
+          `\`${signal.type}\``,
 
         inline:
           true,
@@ -2982,31 +2038,7 @@ function createSignalEmbed(
           "RSI",
 
         value:
-          `\`${formatRSI(
-            rsi
-          )}\``,
-
-        inline:
-          true,
-      },
-
-      {
-        name:
-          "RSI STATUS",
-
-        value:
           `\`${rsiState}\``,
-
-        inline:
-          true,
-      },
-
-      {
-        name:
-          "SIGNAL",
-
-        value:
-          `\`${signal.type}\``,
 
         inline:
           true,
@@ -3053,83 +2085,58 @@ async function sendCRTSignal(
   client,
   data
 ) {
-
   try {
-
     const channelId =
       CHANNELS[
         data.timeframe
       ];
 
-
-    if (
-      !channelId
-    ) {
-
+    if (!channelId) {
       console.warn(
         `[CRT] No Discord channel configured for ${data.timeframe}.`
       );
 
-
       return;
     }
-
 
     const channel =
       await client.channels.fetch(
         channelId
       );
 
-
     if (
       !channel ||
       typeof channel.send !==
         "function"
     ) {
-
       console.warn(
         `[CRT] Invalid Discord channel: ${channelId}`
       );
 
-
       return;
     }
-
 
     const embed =
       createSignalEmbed(
         data
       );
 
-
     await channel.send({
-
-      embeds: [
-        embed,
-      ],
+      embeds: [embed],
     });
-
 
     console.log(
       `[CRT] SIGNAL SENT | ` +
       `${data.provider} | ` +
       `${data.symbol} | ` +
       `${data.timeframe} | ` +
-      `${data.signal.type} | ` +
-      `${formatPrice(
-        data.signal.price
-      )} | ` +
-      `RSI ${formatRSI(
-        data.rsi
-      )} ${data.rsiState}`
+      `CRT ${data.signal.type} | ` +
+      `RSI ${data.rsiState}`
     );
 
-  } catch (
-    error
-  ) {
-
+  } catch (error) {
     console.error(
-      `[CRT] Discord signal error:`,
+      "[CRT] Discord signal error:",
       error
     );
   }
@@ -3145,50 +2152,29 @@ async function runWithConcurrency(
   concurrency,
   worker
 ) {
-
-  if (
-    !items.length
-  ) {
-
+  if (!items.length) {
     return;
   }
 
-
-  let nextIndex =
-    0;
-
+  let nextIndex = 0;
 
   async function runner() {
-
-    while (
-      true
-    ) {
-
+    while (true) {
       const index =
         nextIndex++;
-
 
       if (
         index >=
         items.length
       ) {
-
         return;
       }
 
-
       try {
-
         await worker(
-          items[
-            index
-          ]
+          items[index]
         );
-
-      } catch (
-        error
-      ) {
-
+      } catch (error) {
         console.error(
           "[CRT] Worker error:",
           error.message
@@ -3197,16 +2183,13 @@ async function runWithConcurrency(
     }
   }
 
-
   const workerCount =
     Math.min(
       concurrency,
       items.length
     );
 
-
   await Promise.all(
-
     Array.from(
       {
         length:
@@ -3214,7 +2197,6 @@ async function runWithConcurrency(
       },
       runner
     )
-
   );
 }
 
@@ -3226,145 +2208,94 @@ async function runWithConcurrency(
 async function scanMexc(
   client
 ) {
-
   if (
     Date.now() <
     mexcBlockedUntil
   ) {
-
     return;
   }
 
-
   let symbols;
 
-
   try {
-
     symbols =
       await getMexcFuturesSymbols();
 
-  } catch (
-    error
-  ) {
-
+  } catch (error) {
     console.error(
       "[CRT] MEXC Futures symbol scan failed:",
       error.message
     );
 
-
     return;
   }
 
-
-  if (
-    !symbols.length
-  ) {
-
+  if (!symbols.length) {
     console.warn(
       "[CRT] No MEXC Futures symbols found."
     );
 
-
     return;
   }
-
 
   console.log(
     `[CRT] Scanning ${symbols.length} MEXC Futures contracts.`
   );
 
-
   for (
-    const timeframe
-    of Object.keys(
-      TIMEFRAMES
-    )
+    const timeframe of
+    Object.keys(TIMEFRAMES)
   ) {
-
     if (
       Date.now() <
       mexcBlockedUntil
     ) {
-
       break;
     }
 
-
     const jobs =
       symbols.map(
-        (
-          symbol
-        ) => ({
-
+        symbol => ({
           symbol,
-
           timeframe,
-
         })
       );
 
-
     await runWithConcurrency(
-
       jobs,
-
       MEXC_CONCURRENCY,
-
-      async (
-        job
-      ) => {
-
+      async job => {
         if (
           Date.now() <
           mexcBlockedUntil
         ) {
-
           return;
         }
 
-
         try {
-
           const candles =
             await fetchMexcCandles(
               job.symbol,
               job.timeframe
             );
 
-
           if (
-            candles.length <
-            20
+            candles.length < 20
           ) {
-
             return;
           }
 
-
           await processMarket(
-
             client,
-
             "MEXC",
-
             job.symbol,
-
             job.timeframe,
-
             candles
-
           );
 
-        } catch (
-          error
-        ) {
-
+        } catch (error) {
           console.error(
-
             `[CRT] MEXC ${job.symbol} ${job.timeframe}: ${error.message}`
-
           );
         }
       }
@@ -3380,122 +2311,76 @@ async function scanMexc(
 async function scanOanda(
   client
 ) {
-
   if (
     !OANDA_API_KEY ||
     !OANDA_ACCOUNT_ID
   ) {
-
     console.warn(
       "[CRT] OANDA scan skipped: credentials missing."
     );
 
-
     return;
   }
 
-
   let instruments;
 
-
   try {
-
     instruments =
       await getOandaInstruments();
 
-  } catch (
-    error
-  ) {
-
+  } catch (error) {
     console.error(
       "[CRT] OANDA instrument scan failed:",
       error.message
     );
 
-
     return;
   }
 
-
-  if (
-    !instruments.length
-  ) {
-
+  if (!instruments.length) {
     return;
   }
-
 
   for (
-    const timeframe
-    of Object.keys(
-      TIMEFRAMES
-    )
+    const timeframe of
+    Object.keys(TIMEFRAMES)
   ) {
-
     const jobs =
       instruments.map(
-        (
-          instrument
-        ) => ({
-
+        instrument => ({
           instrument,
-
           timeframe,
-
         })
       );
 
-
     await runWithConcurrency(
-
       jobs,
-
       OANDA_CONCURRENCY,
-
-      async (
-        job
-      ) => {
-
+      async job => {
         try {
-
           const candles =
             await fetchOandaCandles(
               job.instrument,
               job.timeframe
             );
 
-
           if (
-            candles.length <
-            20
+            candles.length < 20
           ) {
-
             return;
           }
 
-
           await processMarket(
-
             client,
-
             "OANDA",
-
             job.instrument,
-
             job.timeframe,
-
             candles
-
           );
 
-        } catch (
-          error
-        ) {
-
+        } catch (error) {
           console.error(
-
             `[CRT] OANDA ${job.instrument} ${job.timeframe}: ${error.message}`
-
           );
         }
       }
@@ -3511,29 +2396,17 @@ async function scanOanda(
 async function runFullScan(
   client
 ) {
-
   console.log(
     "[CRT] Starting full market scan..."
   );
-
-
-  // ----------------------------------------------------------
-  // MEXC Futures
-  // ----------------------------------------------------------
 
   await scanMexc(
     client
   );
 
-
-  // ----------------------------------------------------------
-  // OANDA
-  // ----------------------------------------------------------
-
   await scanOanda(
     client
   );
-
 
   console.log(
     "[CRT] Full market scan completed."
@@ -3548,183 +2421,129 @@ async function runFullScan(
 export function startCRTMonitor(
   client
 ) {
-
   if (
     crtMonitorStarted
   ) {
-
     console.warn(
       "[CRT] Monitor already running."
     );
 
-
     return;
   }
-
 
   if (
     CRT_CONFIG.enabled ===
     false
   ) {
-
     console.log(
       "[CRT] CRT disabled."
     );
 
-
     return;
   }
-
 
   if (
     CRT_CONFIG.autoAlerts ===
     false
   ) {
-
     console.log(
       "[CRT] CRT auto alerts disabled."
     );
 
-
     return;
   }
 
-
-  if (
-    !client
-  ) {
-
+  if (!client) {
     console.error(
       "[CRT] Discord client missing."
     );
 
-
     return;
   }
-
 
   crtMonitorStarted =
     true;
 
-
   console.log(
     "============================================================"
   );
-
 
   console.log(
     "[CRT] CRT SIGNAL MONITOR STARTED"
   );
 
-
   console.log(
     `[CRT] MEXC Futures API: ${MEXC_BASE_URL}`
   );
-
 
   console.log(
     "[CRT] MEXC Spot: DISABLED"
   );
 
-
   console.log(
     "[CRT] OANDA: ENABLED"
   );
 
-
   console.log(
     `[CRT] Timeframes: ${Object.keys(
       TIMEFRAMES
-    ).join(
-      ", "
-    )}`
+    ).join(", ")}`
   );
-
 
   console.log(
     "[CRT] Filtered Top: ON"
   );
 
-
   console.log(
     "[CRT] Filtered Bottom: ON"
   );
-
 
   console.log(
     "[CRT] Rachel T filterBW: FALSE"
   );
 
-
   console.log(
     `[CRT] RSI: ${RSI_PERIOD}`
   );
-
 
   console.log(
     `[CRT] RSI Overbought: ${RSI_OVERBOUGHT}`
   );
 
-
   console.log(
     `[CRT] RSI Oversold: ${RSI_OVERSOLD}`
   );
 
+  console.log(
+    "[CRT] RSI is informational only."
+  );
 
   console.log(
     "============================================================"
   );
 
-
-  // ----------------------------------------------------------
-  // FIRST SCAN
-  //
-  // Establish baseline.
-  //
-  // ----------------------------------------------------------
-
   runFullScan(
     client
-  ).catch(
-    (
+  ).catch(error => {
+    console.error(
+      "[CRT] Initial scan failed:",
       error
-    ) => {
-
-      console.error(
-        "[CRT] Initial scan failed:",
-        error
-      );
-    }
-  );
-
-
-  // ----------------------------------------------------------
-  // CONTINUOUS SCAN
-  // ----------------------------------------------------------
+    );
+  });
 
   monitorTimer =
     setInterval(
-
       () => {
-
         runFullScan(
           client
-        ).catch(
-          (
+        ).catch(error => {
+          console.error(
+            "[CRT] Full scan error:",
             error
-          ) => {
-
-            console.error(
-              "[CRT] Full scan error:",
-              error
-            );
-          }
-        );
-
+          );
+        });
       },
-
       CHECK_INTERVAL
-
     );
 }
 
@@ -3734,24 +2553,17 @@ export function startCRTMonitor(
 // ============================================================
 
 export function stopCRTMonitor() {
-
-  if (
-    monitorTimer
-  ) {
-
+  if (monitorTimer) {
     clearInterval(
       monitorTimer
     );
-
 
     monitorTimer =
       null;
   }
 
-
   crtMonitorStarted =
     false;
-
 
   console.log(
     "[CRT] Monitor stopped."
@@ -3764,26 +2576,17 @@ export function stopCRTMonitor() {
 // ============================================================
 
 export function getAllCRTStatuses() {
-
-  const statuses =
-    {};
-
+  const statuses = {};
 
   for (
-    const timeframe
-    of Object.keys(
-      TIMEFRAMES
-    )
+    const timeframe of
+    Object.keys(TIMEFRAMES)
   ) {
-
-    statuses[
-      timeframe
-    ] =
+    statuses[timeframe] =
       getCRTStatus(
         timeframe
       );
   }
-
 
   return statuses;
 }
@@ -3796,16 +2599,11 @@ export function getAllCRTStatuses() {
 export function testRachelFractal(
   candles
 ) {
-
   if (
-    !Array.isArray(
-      candles
-    )
+    !Array.isArray(candles)
   ) {
-
     return null;
   }
-
 
   return findLastFilteredFractal(
     candles
@@ -3818,9 +2616,7 @@ export function testRachelFractal(
 // ============================================================
 
 export function getCRTServiceInfo() {
-
   return {
-
     cryptoProvider:
       "MEXC FUTURES",
 
@@ -3873,27 +2669,30 @@ console.log(
   "[CRT] Signal service loaded."
 );
 
-
 console.log(
   "[CRT] MEXC Futures API domain:"
 );
-
 
 console.log(
   MEXC_BASE_URL
 );
 
-
 console.log(
   "[CRT] MEXC Spot disabled."
 );
-
 
 console.log(
   "[CRT] Rachel T Filtered Top enabled."
 );
 
-
 console.log(
   "[CRT] Rachel T Filtered Bottom enabled."
+);
+
+console.log(
+  "[CRT] Discord output: CRT BUY / CRT SELL."
+);
+
+console.log(
+  "[CRT] RSI output: OVERBOUGHT / OVERSOLD / NEUTRAL."
 );
