@@ -1,506 +1,1031 @@
+```javascript
 // ============================================================
 // PDYN TOP-DOWN CRT
 // ============================================================
 //
-// HIERARCHY:
+// PURPOSE:
 //
-// 1D
-//  ↓
-// 4H
-//  ↓
-// 1H
-//  ↓
-// 15M
-//  ↓
-// 5M
+// Persistent higher-timeframe CRT state for the 5M output.
 //
-// RULE:
+// FLOW:
 //
-// A lower timeframe CRT must belong to the candle
-// containing the confirmed higher-timeframe CRT candle.
+//   1D
+//    ↓
+//   4H
+//    ↓
+//   1H
+//    ↓
+//   15M
+//    ↓
+//   5M
+//
+// IMPORTANT:
+//
+// 1D / 4H / 1H / 15M continue using their normal CRT output.
+//
+// ONLY 5M uses this module for the Top-Down display.
+//
+// Each higher timeframe is checked independently.
 //
 // Example:
 //
-// 1D CRT candle
-//     ↓
-// 4H CRT candle inside that 1D candle
-//     ↓
-// 1H CRT candle inside that 4H candle
-//     ↓
-// 15M CRT candle inside that 1H candle
-//     ↓
-// 5M CRT candle inside that 15M candle
+//   1D  → HAS CRT
+//   4H  → HAS CRT
+//   1H  → HAS CRT
+//   15M → DOESN'T HAVE CRT
 //
-// Only 5M uses this information for the special
-// Top-Down Discord display.
+// A timeframe does NOT need to generate a new CRT during the
+// current scan.
+//
+// The latest previously detected Rachel T CRT is remembered.
+//
+// 30M is intentionally NOT part of the chain.
 //
 // ============================================================
 
-const TIMEFRAME_MINUTES = {
-  "1d": 1440,
-  "4h": 240,
-  "1h": 60,
-  "15m": 15,
-  "5m": 5,
-};
+// ============================================================
+// TOP-DOWN TIMEFRAMES
+// ============================================================
 
 const TOP_DOWN_TIMEFRAMES = [
   "1d",
   "4h",
   "1h",
   "15m",
-  "5m",
 ];
+
+// ============================================================
+// LOWER TIMEFRAME
+// ============================================================
+
+const LOWER_TIMEFRAME = "5m";
+
+// ============================================================
+// STATE
+// ============================================================
+//
+// Structure:
+//
+// Map<symbol, Map<timeframe, CRT>>
+//
+// Example:
+//
+// symbol:
+//   BTC_USDT
+//
+// timeframe:
+//   1d
+//
+// value:
+//   {
+//     type: "BUY",
+//     fractalType: "BOTTOM",
+//     timestamp: 123456789,
+//     price: 100000,
+//     fractalPrice: 99500
+//   }
+//
+// ============================================================
+
+const topDownState = new Map();
+
+// ============================================================
+// NORMALIZE SYMBOL
+// ============================================================
+
+function normalizeSymbol(symbol) {
+
+  return String(symbol || "")
+    .trim()
+    .toUpperCase();
+
+}
 
 // ============================================================
 // NORMALIZE TIMEFRAME
 // ============================================================
 
 function normalizeTimeframe(timeframe) {
+
   return String(timeframe || "")
     .trim()
     .toLowerCase();
+
 }
 
 // ============================================================
-// TIMEFRAME DURATION
+// VALID HTF
 // ============================================================
 
-function getTimeframeMilliseconds(timeframe) {
-  const normalized = normalizeTimeframe(timeframe);
+function isTopDownTimeframe(timeframe) {
 
-  const minutes =
-    TIMEFRAME_MINUTES[normalized];
+  const normalized =
+    normalizeTimeframe(timeframe);
 
-  if (!minutes) {
-    return 0;
-  }
+  return TOP_DOWN_TIMEFRAMES.includes(
+    normalized
+  );
 
-  return minutes * 60 * 1000;
 }
 
 // ============================================================
-// CANDLE RANGE
+// CREATE SYMBOL STATE
 // ============================================================
 
-export function getCandleRange(
-  timestamp,
-  timeframe
-) {
-  const start = Number(timestamp);
+function createSymbolState() {
 
-  if (!Number.isFinite(start)) {
+  return {
+
+    "1d": null,
+
+    "4h": null,
+
+    "1h": null,
+
+    "15m": null,
+
+  };
+
+}
+
+// ============================================================
+// GET SYMBOL STATE
+// ============================================================
+
+function getSymbolState(symbol) {
+
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+
     return null;
+
   }
 
-  const duration =
-    getTimeframeMilliseconds(timeframe);
+  if (!topDownState.has(normalizedSymbol)) {
 
-  if (!duration) {
+    topDownState.set(
+      normalizedSymbol,
+      createSymbolState()
+    );
+
+  }
+
+  return topDownState.get(
+    normalizedSymbol
+  );
+
+}
+
+// ============================================================
+// CLONE CRT
+// ============================================================
+//
+// Prevent accidental mutation of stored state.
+//
+// ============================================================
+
+function cloneCRT(crt) {
+
+  if (!crt) {
+
     return null;
+
   }
 
   return {
-    start,
-    end: start + duration,
+
+    ...crt,
+
   };
+
 }
 
 // ============================================================
-// TIMESTAMP INSIDE CANDLE
-// ============================================================
-
-export function isTimestampInsideCandle(
-  timestamp,
-  candleTimestamp,
-  timeframe
-) {
-  const childTimestamp =
-    Number(timestamp);
-
-  const parentTimestamp =
-    Number(candleTimestamp);
-
-  if (
-    !Number.isFinite(childTimestamp) ||
-    !Number.isFinite(parentTimestamp)
-  ) {
-    return false;
-  }
-
-  const range =
-    getCandleRange(
-      parentTimestamp,
-      timeframe
-    );
-
-  if (!range) {
-    return false;
-  }
-
-  return (
-    childTimestamp >= range.start &&
-    childTimestamp < range.end
-  );
-}
-
-// ============================================================
-// SIGNAL INSIDE PARENT SIGNAL
+// UPDATE TOP-DOWN CRT
 // ============================================================
 //
-// The child fractal candle must physically occur
-// inside the parent fractal candle.
+// Called whenever a new Rachel T CRT is detected on:
+//
+//   1D
+//   4H
+//   1H
+//   15M
+//
+// The previous CRT remains stored until a newer CRT replaces it.
 //
 // ============================================================
 
-export function isSignalInsideParent(
-  childSignal,
-  parentSignal,
-  parentTimeframe
+export function updateTopDownCRT(
+  symbol,
+  timeframe,
+  signal
 ) {
-  if (
-    !childSignal ||
-    !parentSignal
-  ) {
-    return false;
+
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (!normalizedSymbol) {
+
+    return null;
+
   }
 
   if (
-    !Number.isFinite(
-      Number(childSignal.timestamp)
-    ) ||
-    !Number.isFinite(
-      Number(parentSignal.timestamp)
+    !isTopDownTimeframe(
+      normalizedTimeframe
     )
   ) {
-    return false;
+
+    return null;
+
   }
 
-  return isTimestampInsideCandle(
-    childSignal.timestamp,
-    parentSignal.timestamp,
-    parentTimeframe
+  if (!signal) {
+
+    return null;
+
+  }
+
+  const state =
+    getSymbolState(
+      normalizedSymbol
+    );
+
+  const previous =
+    state[
+      normalizedTimeframe
+    ];
+
+  //
+  // Store a clean copy.
+  //
+
+  const storedCRT = {
+
+    type:
+      signal.type || null,
+
+    fractalType:
+      signal.fractalType || null,
+
+    timestamp:
+      Number.isFinite(
+        Number(
+          signal.timestamp
+        )
+      )
+        ? Number(
+            signal.timestamp
+          )
+        : null,
+
+    price:
+      Number.isFinite(
+        Number(
+          signal.price
+        )
+      )
+        ? Number(
+            signal.price
+          )
+        : null,
+
+    fractalPrice:
+      Number.isFinite(
+        Number(
+          signal.fractalPrice
+        )
+      )
+        ? Number(
+            signal.fractalPrice
+          )
+        : null,
+
+    volume:
+      Number.isFinite(
+        Number(
+          signal.volume
+        )
+      )
+        ? Number(
+            signal.volume
+          )
+        : 0,
+
+  };
+
+  state[
+    normalizedTimeframe
+  ] =
+    storedCRT;
+
+  return {
+
+    previous:
+      cloneCRT(
+        previous
+      ),
+
+    current:
+      cloneCRT(
+        storedCRT
+      ),
+
+  };
+
+}
+
+// ============================================================
+// GET STORED CRT
+// ============================================================
+
+export function getTopDownCRT(
+  symbol,
+  timeframe
+) {
+
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (!normalizedSymbol) {
+
+    return null;
+
+  }
+
+  if (
+    !isTopDownTimeframe(
+      normalizedTimeframe
+    )
+  ) {
+
+    return null;
+
+  }
+
+  const state =
+    topDownState.get(
+      normalizedSymbol
+    );
+
+  if (!state) {
+
+    return null;
+
+  }
+
+  return cloneCRT(
+    state[
+      normalizedTimeframe
+    ]
   );
+
+}
+
+// ============================================================
+// CHECK HAS CRT
+// ============================================================
+
+export function hasTopDownCRT(
+  symbol,
+  timeframe
+) {
+
+  return Boolean(
+    getTopDownCRT(
+      symbol,
+      timeframe
+    )
+  );
+
+}
+
+// ============================================================
+// GET ALL STORED CRT
+// ============================================================
+
+export function getTopDownState(
+  symbol
+) {
+
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+
+    return null;
+
+  }
+
+  const state =
+    topDownState.get(
+      normalizedSymbol
+    );
+
+  if (!state) {
+
+    return createSymbolState();
+
+  }
+
+  return {
+
+    "1d":
+      cloneCRT(
+        state["1d"]
+      ),
+
+    "4h":
+      cloneCRT(
+        state["4h"]
+      ),
+
+    "1h":
+      cloneCRT(
+        state["1h"]
+      ),
+
+    "15m":
+      cloneCRT(
+        state["15m"]
+      ),
+
+  };
+
 }
 
 // ============================================================
 // BUILD TOP-DOWN CHAIN
 // ============================================================
 //
-// states format:
+// IMPORTANT:
 //
-// {
-//   "1d": signal,
-//   "4h": signal,
-//   "1h": signal,
-//   "15m": signal,
-//   "5m": signal
-// }
+// This does NOT enforce price containment.
 //
-// The chain is confirmed only when every level exists
-// AND every lower timeframe belongs to its parent candle.
+// It simply reports whether each HTF currently has a stored
+// Rachel T CRT.
 //
 // ============================================================
 
 export function buildTopDownChain(
-  states
+  symbol
 ) {
-  const source =
-    states instanceof Map
-      ? Object.fromEntries(states)
-      : (
-          states &&
-          typeof states === "object"
-            ? states
-            : {}
-        );
 
-  const result = {
-    confirmed: false,
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
 
-    levels: {
-      "1d": {
-        hasCRT: false,
-        type: null,
-        signal: null,
-        linked: true,
-      },
+  const state =
+    getSymbolState(
+      normalizedSymbol
+    );
 
-      "4h": {
-        hasCRT: false,
-        type: null,
-        signal: null,
-        linked: false,
-      },
+  const chain =
+    TOP_DOWN_TIMEFRAMES.map(
+      timeframe => {
 
-      "1h": {
-        hasCRT: false,
-        type: null,
-        signal: null,
-        linked: false,
-      },
+        const crt =
+          state
+            ? state[
+                timeframe
+              ]
+            : null;
 
-      "15m": {
-        hasCRT: false,
-        type: null,
-        signal: null,
-        linked: false,
-      },
+        return {
 
-      "5m": {
-        hasCRT: false,
-        type: null,
-        signal: null,
-        linked: false,
-      },
-    },
+          timeframe,
 
-    confirmedCount: 0,
+          label:
+            formatTimeframeLabel(
+              timeframe
+            ),
 
-    total: 5,
+          hasCRT:
+            Boolean(
+              crt
+            ),
 
-    chainStatus: "INCOMPLETE",
+          status:
+            crt
+              ? "HAS CRT"
+              : "DOESN'T HAVE CRT",
+
+          type:
+            crt?.type ||
+            null,
+
+          fractalType:
+            crt?.fractalType ||
+            null,
+
+          timestamp:
+            crt?.timestamp ||
+            null,
+
+          price:
+            crt?.price ||
+            null,
+
+          fractalPrice:
+            crt?.fractalPrice ||
+            null,
+
+          signal:
+            crt
+              ? cloneCRT(
+                  crt
+                )
+              : null,
+
+        };
+
+      }
+    );
+
+  const confirmed =
+    chain.filter(
+      item =>
+        item.hasCRT
+    ).length;
+
+  return {
+
+    symbol:
+      normalizedSymbol,
+
+    timeframes:
+      chain,
+
+    confirmed,
+
+    total:
+      TOP_DOWN_TIMEFRAMES.length,
+
+    lowerTimeframe:
+      LOWER_TIMEFRAME,
+
+    complete:
+      confirmed ===
+      TOP_DOWN_TIMEFRAMES.length,
+
   };
 
-  // ----------------------------------------------------------
-  // 1D
-  // ----------------------------------------------------------
-
-  const daily =
-    source["1d"] || null;
-
-  if (
-    daily &&
-    daily.type &&
-    Number.isFinite(
-      Number(daily.timestamp)
-    )
-  ) {
-    result.levels["1d"] = {
-      hasCRT: true,
-      type: daily.type,
-      signal: daily,
-      linked: true,
-    };
-
-    result.confirmedCount++;
-  } else {
-    return result;
-  }
-
-  // ----------------------------------------------------------
-  // 4H
-  // ----------------------------------------------------------
-
-  const fourHour =
-    source["4h"] || null;
-
-  if (
-    fourHour &&
-    fourHour.type &&
-    isSignalInsideParent(
-      fourHour,
-      daily,
-      "1d"
-    )
-  ) {
-    result.levels["4h"] = {
-      hasCRT: true,
-      type: fourHour.type,
-      signal: fourHour,
-      linked: true,
-    };
-
-    result.confirmedCount++;
-  } else {
-    return result;
-  }
-
-  // ----------------------------------------------------------
-  // 1H
-  // ----------------------------------------------------------
-
-  const oneHour =
-    source["1h"] || null;
-
-  if (
-    oneHour &&
-    oneHour.type &&
-    isSignalInsideParent(
-      oneHour,
-      fourHour,
-      "4h"
-    )
-  ) {
-    result.levels["1h"] = {
-      hasCRT: true,
-      type: oneHour.type,
-      signal: oneHour,
-      linked: true,
-    };
-
-    result.confirmedCount++;
-  } else {
-    return result;
-  }
-
-  // ----------------------------------------------------------
-  // 15M
-  // ----------------------------------------------------------
-
-  const fifteenMinute =
-    source["15m"] || null;
-
-  if (
-    fifteenMinute &&
-    fifteenMinute.type &&
-    isSignalInsideParent(
-      fifteenMinute,
-      oneHour,
-      "1h"
-    )
-  ) {
-    result.levels["15m"] = {
-      hasCRT: true,
-      type: fifteenMinute.type,
-      signal: fifteenMinute,
-      linked: true,
-    };
-
-    result.confirmedCount++;
-  } else {
-    return result;
-  }
-
-  // ----------------------------------------------------------
-  // 5M
-  // ----------------------------------------------------------
-
-  const fiveMinute =
-    source["5m"] || null;
-
-  if (
-    fiveMinute &&
-    fiveMinute.type &&
-    isSignalInsideParent(
-      fiveMinute,
-      fifteenMinute,
-      "15m"
-    )
-  ) {
-    result.levels["5m"] = {
-      hasCRT: true,
-      type: fiveMinute.type,
-      signal: fiveMinute,
-      linked: true,
-    };
-
-    result.confirmedCount++;
-  }
-
-  // ----------------------------------------------------------
-  // FINAL STATUS
-  // ----------------------------------------------------------
-
-  result.confirmed =
-    result.confirmedCount === 5;
-
-  result.chainStatus =
-    result.confirmed
-      ? "CONFIRMED"
-      : "INCOMPLETE";
-
-  return result;
 }
 
 // ============================================================
-// DISPLAY STATUS
+// ANALYZE TOP-DOWN
 // ============================================================
 //
-// This is intentionally independent from chain validity.
+// The 5M signal is passed in for context.
 //
-// Every timeframe is displayed.
+// The 5M itself is NOT counted as an HTF confirmation.
 //
 // ============================================================
 
-export function getLevelDisplay(
-  level
+export function analyzeTopDown(
+  symbol,
+  fiveMinuteSignal = null
 ) {
-  if (
-    !level ||
-    !level.hasCRT
-  ) {
-    return "❌ NO CRT";
-  }
 
-  if (
-    level.type === "BUY"
-  ) {
-    return "🟢 BUY CRT";
-  }
+  const chain =
+    buildTopDownChain(
+      symbol
+    );
 
-  if (
-    level.type === "SELL"
-  ) {
-    return "🔴 SELL CRT";
-  }
+  return {
 
-  return "❓ UNKNOWN";
+    ...chain,
+
+    fiveMinute: fiveMinuteSignal
+      ? cloneCRT(
+          fiveMinuteSignal
+        )
+      : null,
+
+  };
+
 }
 
 // ============================================================
-// FORMAT 5M TOP-DOWN DISPLAY
+// TIMEFRAME LABEL
+// ============================================================
+
+function formatTimeframeLabel(
+  timeframe
+) {
+
+  switch (
+    normalizeTimeframe(
+      timeframe
+    )
+  ) {
+
+    case "1d":
+
+      return "1D";
+
+    case "4h":
+
+      return "4H";
+
+    case "1h":
+
+      return "1H";
+
+    case "15m":
+
+      return "15M";
+
+    case "5m":
+
+      return "5M";
+
+    default:
+
+      return String(
+        timeframe || ""
+      ).toUpperCase();
+
+  }
+
+}
+
+// ============================================================
+// FORMAT TOP-DOWN COUNT
+// ============================================================
+//
+// Example:
+//
+//   3/4 CONFIRMED
+//
+// ============================================================
+
+export function formatTopDownCount(
+  topDown
+) {
+
+  if (!topDown) {
+
+    return "0/4 CONFIRMED";
+
+  }
+
+  const confirmed =
+    Number(
+      topDown.confirmed
+    ) || 0;
+
+  const total =
+    Number(
+      topDown.total
+    ) ||
+    TOP_DOWN_TIMEFRAMES.length;
+
+  return (
+    `${confirmed}/${total} CONFIRMED`
+  );
+
+}
+
+// ============================================================
+// FORMAT HTF CRT
+// ============================================================
+//
+// Example:
+//
+// 1D HAS CRT • 4H HAS CRT • 1H HAS CRT • 15M DOESN'T HAVE CRT
+//
+// ============================================================
+
+export function formatHTFCRT(
+  topDown
+) {
+
+  if (!topDown) {
+
+    return (
+      "1D N/A • " +
+      "4H N/A • " +
+      "1H N/A • " +
+      "15M N/A"
+    );
+
+  }
+
+  const chain =
+    Array.isArray(
+      topDown.timeframes
+    )
+      ? topDown.timeframes
+      : [];
+
+  return TOP_DOWN_TIMEFRAMES
+    .map(
+      timeframe => {
+
+        const item =
+          chain.find(
+            entry =>
+              entry.timeframe ===
+              timeframe
+          );
+
+        const label =
+          formatTimeframeLabel(
+            timeframe
+          );
+
+        if (!item) {
+
+          return (
+            `${label} DOESN'T HAVE CRT`
+          );
+
+        }
+
+        return (
+          `${label} ${
+            item.hasCRT
+              ? "HAS CRT"
+              : "DOESN'T HAVE CRT"
+          }`
+        );
+
+      }
+    )
+    .join(
+      " • "
+    );
+
+}
+
+// ============================================================
+// FORMAT DETAILED TOP-DOWN DISPLAY
+// ============================================================
+//
+// This is useful for logs / debugging.
+//
 // ============================================================
 
 export function formatTopDownDisplay(
-  chain
+  topDown
 ) {
-  if (!chain) {
-    return [
-      "1D  → ❌ NO CRT",
-      "4H  → ❌ NO CRT",
-      "1H  → ❌ NO CRT",
-      "15M → ❌ NO CRT",
-      "5M  → ❌ NO CRT",
-      "",
-      "TOP-DOWN → INCOMPLETE",
-    ].join("\n");
+
+  if (!topDown) {
+
+    return (
+      "TOP-DOWN\n" +
+      "1D → DOESN'T HAVE CRT\n" +
+      "4H → DOESN'T HAVE CRT\n" +
+      "1H → DOESN'T HAVE CRT\n" +
+      "15M → DOESN'T HAVE CRT"
+    );
+
   }
 
-  const lines = [
-    `1D  → ${getLevelDisplay(chain.levels["1d"])}`,
-    `4H  → ${getLevelDisplay(chain.levels["4h"])}`,
-    `1H  → ${getLevelDisplay(chain.levels["1h"])}`,
-    `15M → ${getLevelDisplay(chain.levels["15m"])}`,
-    `5M  → ${getLevelDisplay(chain.levels["5m"])}`,
-    "",
-    `TOP-DOWN → ${chain.chainStatus}`,
+  const chain =
+    Array.isArray(
+      topDown.timeframes
+    )
+      ? topDown.timeframes
+      : [];
+
+  const lines =
+    TOP_DOWN_TIMEFRAMES.map(
+      timeframe => {
+
+        const item =
+          chain.find(
+            entry =>
+              entry.timeframe ===
+              timeframe
+          );
+
+        const label =
+          formatTimeframeLabel(
+            timeframe
+          );
+
+        if (!item) {
+
+          return (
+            `${label} → DOESN'T HAVE CRT`
+          );
+
+        }
+
+        if (
+          item.hasCRT
+        ) {
+
+          const type =
+            item.type
+              ? ` (${item.type})`
+              : "";
+
+          return (
+            `${label} → HAS CRT${type}`
+          );
+
+        }
+
+        return (
+          `${label} → DOESN'T HAVE CRT`
+        );
+
+      }
+    );
+
+  return (
+    "TOP-DOWN\n" +
+    lines.join(
+      "\n"
+    )
+  );
+
+}
+
+// ============================================================
+// GET TOP-DOWN TIMEFRAMES
+// ============================================================
+
+export function getTopDownTimeframes() {
+
+  return [
+    ...TOP_DOWN_TIMEFRAMES,
   ];
 
-  return lines.join("\n");
 }
 
 // ============================================================
-// EMPTY TOP-DOWN STATE
+// GET LOWER TIMEFRAME
 // ============================================================
 
-export function createEmptyTopDownState() {
+export function getLowerTimeframe() {
+
+  return LOWER_TIMEFRAME;
+
+}
+
+// ============================================================
+// CLEAR SYMBOL
+// ============================================================
+//
+// Useful for testing or manually resetting a symbol.
+//
+// ============================================================
+
+export function clearTopDownSymbol(
+  symbol
+) {
+
+  const normalizedSymbol =
+    normalizeSymbol(
+      symbol
+    );
+
+  if (!normalizedSymbol) {
+
+    return false;
+
+  }
+
+  return topDownState.delete(
+    normalizedSymbol
+  );
+
+}
+
+// ============================================================
+// CLEAR ALL
+// ============================================================
+//
+// Clears all persistent top-down state.
+//
+// ============================================================
+
+export function clearAllTopDownState() {
+
+  topDownState.clear();
+
+}
+
+// ============================================================
+// EXPORT SNAPSHOT
+// ============================================================
+//
+// Returns all stored HTF CRT data.
+//
+// ============================================================
+
+export function getAllTopDownState() {
+
+  const result = {};
+
+  for (
+    const [
+      symbol,
+      state
+    ]
+    of topDownState.entries()
+  ) {
+
+    result[
+      symbol
+    ] = {
+
+      "1d":
+        cloneCRT(
+          state["1d"]
+        ),
+
+      "4h":
+        cloneCRT(
+          state["4h"]
+        ),
+
+      "1h":
+        cloneCRT(
+          state["1h"]
+        ),
+
+      "15m":
+        cloneCRT(
+          state["15m"]
+        ),
+
+    };
+
+  }
+
+  return result;
+
+}
+
+// ============================================================
+// SERVICE INFO
+// ============================================================
+
+export function getTopDownServiceInfo() {
+
   return {
-    "1d": null,
-    "4h": null,
-    "1h": null,
-    "15m": null,
-    "5m": null,
+
+    timeframes:
+      [
+        ...TOP_DOWN_TIMEFRAMES,
+      ],
+
+    lowerTimeframe:
+      LOWER_TIMEFRAME,
+
+    persistent:
+      true,
+
+    containmentRequired:
+      false,
+
+    independentConfirmation:
+      true,
+
+    description:
+      "Persistent independent HTF Rachel T CRT state for 5M top-down display.",
+
   };
+
 }
 
 // ============================================================
-// EXPORTS
+// STARTUP
 // ============================================================
 
-export {
-  TIMEFRAME_MINUTES,
-  TOP_DOWN_TIMEFRAMES,
-  normalizeTimeframe,
-  getTimeframeMilliseconds,
-};
+console.log(
+  "[TOP-DOWN] Module loaded."
+);
+
+console.log(
+  "[TOP-DOWN] HTF chain: 1D -> 4H -> 1H -> 15M -> 5M"
+);
+
+console.log(
+  "[TOP-DOWN] Persistent HTF CRT: ENABLED"
+);
+
+console.log(
+  "[TOP-DOWN] Independent HTF confirmation: ENABLED"
+);
+
+console.log(
+  "[TOP-DOWN] Price containment requirement: DISABLED"
+);
+
+console.log(
+  "[TOP-DOWN] 30M: REMOVED"
+);
+```
