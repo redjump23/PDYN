@@ -212,11 +212,11 @@ const CANDLE_LIMIT =
 const CHECK_INTERVAL =
   Number(
     CRT_CONFIG.checkInterval
-  ) >= 1000
+  ) >= 10000
     ? Number(
         CRT_CONFIG.checkInterval
       )
-    : 5000;
+    : 30000;
 
 // ============================================================
 // CONCURRENCY
@@ -257,6 +257,26 @@ let crtMonitorStarted =
 
 let monitorTimer =
   null;
+
+ // ============================================================
+// SCAN LOCK
+// ============================================================
+//
+// Prevents multiple full MEXC scans from running at the
+// same time.
+//
+// IMPORTANT:
+//
+// A full scan can take longer than the configured interval
+// when MEXC has many Futures contracts.
+//
+// Without this lock, setInterval() can start another scan
+// before the previous scan finishes.
+//
+// ============================================================
+
+let scanRunning =
+  false;
 
 // ============================================================
 // MEXC BLOCK
@@ -3629,21 +3649,80 @@ async function scanMexc(
 // FULL SCAN
 // ============================================================
 
+// ============================================================
+// FULL SCAN
+// ============================================================
+//
+// IMPORTANT:
+//
+// Only ONE full scan may run at a time.
+//
+// This prevents:
+//
+//   scan A
+//   scan B
+//   scan C
+//   scan D
+//
+// from piling up when MEXC takes longer than the interval.
+//
+// ============================================================
+
 async function runFullScan(
   client
 ) {
 
-  console.log(
-    "[CRT] Starting MEXC CRT scan..."
-  );
+  if (
+    scanRunning
+  ) {
 
-  await scanMexc(
-    client
-  );
+    console.log(
+      "[CRT] Previous scan still running. Skipping this cycle."
+    );
 
-  console.log(
-    "[CRT] MEXC CRT scan completed."
-  );
+    return;
+
+  }
+
+  scanRunning =
+    true;
+
+  const startedAt =
+    Date.now();
+
+  try {
+
+    console.log(
+      "[CRT] Starting MEXC CRT scan..."
+    );
+
+    await scanMexc(
+      client
+    );
+
+    const duration =
+      Date.now() -
+      startedAt;
+
+    console.log(
+      `[CRT] MEXC CRT scan completed in ${duration}ms.`
+    );
+
+  } catch (
+    error
+  ) {
+
+    console.error(
+      "[CRT] Full scan failed:",
+      error
+    );
+
+  } finally {
+
+    scanRunning =
+      false;
+
+  }
 
 }
 
@@ -3795,26 +3874,17 @@ export function startCRTMonitor(
     }
   );
 
-  monitorTimer =
-    setInterval(
-      () => {
+ monitorTimer =
+  setInterval(
+    () => {
 
-        runFullScan(
-          client
-        ).catch(
-          error => {
+      runFullScan(
+        client
+      );
 
-            console.error(
-              "[CRT] Full scan error:",
-              error
-            );
-
-          }
-        );
-
-      },
-      CHECK_INTERVAL
-    );
+    },
+    CHECK_INTERVAL
+  );
 
 }
 
