@@ -1,4 +1,3 @@
-
 // ============================================================
 // PDYN CRT TOP-DOWN SERVICE
 // ============================================================
@@ -26,7 +25,7 @@
 //   • Save confirmed HTF fractals to PostgreSQL.
 //   • Load previous HTF fractals from PostgreSQL on startup.
 //   • If no NEW fractal is found, keep the previous one.
-//   • If the API/data has a temporary problem, keep the
+//   • If API/data has a temporary problem, keep the
 //     previous stored fractal.
 //   • A newer confirmed fractal replaces the old one.
 //   • 5M reads the latest stored HTF fractals.
@@ -49,7 +48,6 @@
 
 import { pgDb } from "../../utils/postgresDatabase.js";
 
-
 // ============================================================
 // TIMEFRAMES
 // ============================================================
@@ -61,13 +59,11 @@ const TOP_DOWN_TIMEFRAMES = [
   "15m",
 ];
 
-
 // ============================================================
 // LOWER TIMEFRAME
 // ============================================================
 
 const LOWER_TIMEFRAME = "5m";
-
 
 // ============================================================
 // ALL TIMEFRAMES
@@ -77,7 +73,6 @@ const ALL_TIMEFRAMES = [
   ...TOP_DOWN_TIMEFRAMES,
   LOWER_TIMEFRAME,
 ];
-
 
 // ============================================================
 // IN-MEMORY STATE
@@ -102,7 +97,6 @@ const ALL_TIMEFRAMES = [
 
 const topDownState = new Map();
 
-
 // ============================================================
 // DATABASE PREFIX
 // ============================================================
@@ -120,16 +114,13 @@ const topDownState = new Map();
 //
 // ============================================================
 
-const TOPDOWN_DB_PREFIX =
-  "temp:crt_topdown";
-
+const TOPDOWN_DB_PREFIX = "temp:crt_topdown";
 
 // ============================================================
 // DATABASE LOAD STATE
 // ============================================================
 
 let topDownPersistenceLoaded = false;
-
 
 // ============================================================
 // NORMALIZE SYMBOL
@@ -141,7 +132,6 @@ function normalizeSymbol(symbol) {
     .toUpperCase();
 }
 
-
 // ============================================================
 // NORMALIZE TIMEFRAME
 // ============================================================
@@ -152,22 +142,17 @@ function normalizeTimeframe(timeframe) {
     .toLowerCase();
 }
 
-
 // ============================================================
 // BUILD DATABASE KEY
 // ============================================================
 
-function getTopDownDatabaseKey(
-  symbol,
-  timeframe
-) {
+function getTopDownDatabaseKey(symbol, timeframe) {
   return (
     `${TOPDOWN_DB_PREFIX}:` +
     `${normalizeSymbol(symbol)}:` +
     `${normalizeTimeframe(timeframe)}`
   );
 }
-
 
 // ============================================================
 // CHECK HTF
@@ -179,7 +164,6 @@ export function isTopDownTimeframe(timeframe) {
   );
 }
 
-
 // ============================================================
 // CHECK SUPPORTED TIMEFRAME
 // ============================================================
@@ -190,14 +174,12 @@ function isSupportedTimeframe(timeframe) {
   );
 }
 
-
 // ============================================================
 // GET SYMBOL STATE
 // ============================================================
 
 function getSymbolState(symbol) {
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
+  const normalizedSymbol = normalizeSymbol(symbol);
 
   if (!normalizedSymbol) {
     return null;
@@ -210,11 +192,8 @@ function getSymbolState(symbol) {
     );
   }
 
-  return topDownState.get(
-    normalizedSymbol
-  );
+  return topDownState.get(normalizedSymbol);
 }
-
 
 // ============================================================
 // NORMALIZE SIGNAL
@@ -233,78 +212,52 @@ function getSymbolState(symbol) {
 //
 // ============================================================
 
-function normalizeSignal(
-  symbol,
-  timeframe,
-  signal
-) {
+function normalizeSignal(symbol, timeframe, signal) {
   if (!signal) {
     return null;
   }
 
-  const normalizedSymbol =
-    normalizeSymbol(symbol);
+  const normalizedSymbol = normalizeSymbol(symbol);
 
   const normalizedTimeframe =
     normalizeTimeframe(timeframe);
 
   if (
     !normalizedSymbol ||
-    !isSupportedTimeframe(
-      normalizedTimeframe
-    )
+    !isSupportedTimeframe(normalizedTimeframe)
   ) {
     return null;
   }
 
-  const timestamp =
-    Number(signal.timestamp);
+  const timestamp = Number(signal.timestamp);
 
-  if (
-    !Number.isFinite(timestamp)
-  ) {
+  if (!Number.isFinite(timestamp)) {
     return null;
   }
 
-  const type =
-    String(signal.type || "")
-      .trim()
-      .toUpperCase();
+  const type = String(signal.type || "")
+    .trim()
+    .toUpperCase();
 
-  if (
-    type !== "BUY" &&
-    type !== "SELL"
-  ) {
+  if (type !== "BUY" && type !== "SELL") {
     return null;
   }
 
-  const fractalType =
-    String(
-      signal.fractalType ||
-      (
-        type === "BUY"
-          ? "BOTTOM"
-          : "TOP"
-      )
-    )
-      .trim()
-      .toUpperCase();
+  const fractalType = String(
+    signal.fractalType ||
+      (type === "BUY" ? "BOTTOM" : "TOP")
+  )
+    .trim()
+    .toUpperCase();
 
-  const price =
-    Number(signal.price);
-
-  const fractalPrice =
-    Number(signal.fractalPrice);
-
-  const volume =
-    Number(signal.volume);
+  const price = Number(signal.price);
+  const fractalPrice = Number(signal.fractalPrice);
+  const volume = Number(signal.volume);
 
   return {
-    symbol:
-      normalizedSymbol,
+    symbol: normalizedSymbol,
 
-    timeframe:
-      normalizedTimeframe,
+    timeframe: normalizedTimeframe,
 
     type,
 
@@ -312,26 +265,21 @@ function normalizeSignal(
 
     timestamp,
 
-    price:
-      Number.isFinite(price)
-        ? price
-        : null,
+    price: Number.isFinite(price)
+      ? price
+      : null,
 
-    fractalPrice:
-      Number.isFinite(fractalPrice)
-        ? fractalPrice
-        : null,
+    fractalPrice: Number.isFinite(fractalPrice)
+      ? fractalPrice
+      : null,
 
-    volume:
-      Number.isFinite(volume)
-        ? volume
-        : 0,
+    volume: Number.isFinite(volume)
+      ? volume
+      : 0,
 
-    storedAt:
-      Date.now(),
+    storedAt: Date.now(),
   };
 }
-
 
 // ============================================================
 // SAVE CRT TO POSTGRESQL
@@ -346,9 +294,7 @@ function normalizeSignal(
 //
 // ============================================================
 
-async function saveTopDownCRTToDatabase(
-  signal
-) {
+async function saveTopDownCRTToDatabase(signal) {
   try {
     if (!pgDb.isAvailable()) {
       console.warn(
@@ -363,25 +309,19 @@ async function saveTopDownCRTToDatabase(
       return false;
     }
 
-    if (
-      !isTopDownTimeframe(
-        signal.timeframe
-      )
-    ) {
+    if (!isTopDownTimeframe(signal.timeframe)) {
       return false;
     }
 
-    const key =
-      getTopDownDatabaseKey(
-        signal.symbol,
-        signal.timeframe
-      );
+    const key = getTopDownDatabaseKey(
+      signal.symbol,
+      signal.timeframe
+    );
 
-    const saved =
-      await pgDb.set(
-        key,
-        signal
-      );
+    const saved = await pgDb.set(
+      key,
+      signal
+    );
 
     if (saved) {
       console.log(
@@ -402,7 +342,6 @@ async function saveTopDownCRTToDatabase(
     return false;
   }
 }
-
 
 // ============================================================
 // LOAD ALL CRT STATE FROM POSTGRESQL
@@ -437,10 +376,9 @@ export async function loadTopDownPersistence() {
       "[TOPDOWN] Loading persistent CRT state from PostgreSQL..."
     );
 
-    const keys =
-      await pgDb.list(
-        TOPDOWN_DB_PREFIX
-      );
+    const keys = await pgDb.list(
+      TOPDOWN_DB_PREFIX
+    );
 
     let loaded = 0;
 
@@ -457,29 +395,26 @@ export async function loadTopDownPersistence() {
         const prefix =
           `${TOPDOWN_DB_PREFIX}:`;
 
-        const remainder =
-          key.slice(
-            prefix.length
-          );
+        const remainder = key.slice(
+          prefix.length
+        );
 
         const separatorIndex =
           remainder.lastIndexOf(":");
 
         if (
           separatorIndex <= 0 ||
-          separatorIndex >=
-            remainder.length - 1
+          separatorIndex >= remainder.length - 1
         ) {
           continue;
         }
 
-        const symbol =
-          normalizeSymbol(
-            remainder.slice(
-              0,
-              separatorIndex
-            )
-          );
+        const symbol = normalizeSymbol(
+          remainder.slice(
+            0,
+            separatorIndex
+          )
+        );
 
         const timeframe =
           normalizeTimeframe(
@@ -490,18 +425,15 @@ export async function loadTopDownPersistence() {
 
         if (
           !symbol ||
-          !isTopDownTimeframe(
-            timeframe
-          )
+          !isTopDownTimeframe(timeframe)
         ) {
           continue;
         }
 
-        const signal =
-          await pgDb.get(
-            key,
-            null
-          );
+        const signal = await pgDb.get(
+          key,
+          null
+        );
 
         if (!signal) {
           continue;
@@ -524,18 +456,14 @@ export async function loadTopDownPersistence() {
         }
 
         const symbolState =
-          getSymbolState(
-            symbol
-          );
+          getSymbolState(symbol);
 
         if (!symbolState) {
           continue;
         }
 
         const previous =
-          symbolState.get(
-            timeframe
-          );
+          symbolState.get(timeframe);
 
         if (
           !previous ||
@@ -564,8 +492,7 @@ export async function loadTopDownPersistence() {
       }
     }
 
-    topDownPersistenceLoaded =
-      true;
+    topDownPersistenceLoaded = true;
 
     console.log(
       `[TOPDOWN] PostgreSQL state loaded: ` +
@@ -582,7 +509,6 @@ export async function loadTopDownPersistence() {
     return false;
   }
 }
-
 
 // ============================================================
 // STORE CRT
@@ -645,7 +571,6 @@ export function updateTopDownCRT(
       normalizedTimeframe
     );
 
-
   // ----------------------------------------------------------
   // FIRST CONFIRMED FRACTAL
   // ----------------------------------------------------------
@@ -669,7 +594,6 @@ export function updateTopDownCRT(
     return true;
   }
 
-
   // ----------------------------------------------------------
   // OLD OR SAME FRACTAL
   // ----------------------------------------------------------
@@ -680,7 +604,6 @@ export function updateTopDownCRT(
   ) {
     return false;
   }
-
 
   // ----------------------------------------------------------
   // NEWER FRACTAL
@@ -703,7 +626,6 @@ export function updateTopDownCRT(
 
   return true;
 }
-
 
 // ============================================================
 // GET STORED CRT
@@ -740,11 +662,9 @@ export function getTopDownCRT(
   return (
     symbolState.get(
       normalizedTimeframe
-    ) ||
-    null
+    ) || null
   );
 }
-
 
 // ============================================================
 // GET ALL STORED HTF CRT
@@ -791,7 +711,6 @@ export function getStoredTopDownState(
   return result;
 }
 
-
 // ============================================================
 // CREATE EMPTY STATE
 // ============================================================
@@ -805,7 +724,6 @@ export function createEmptyTopDownState() {
   };
 }
 
-
 // ============================================================
 // GET TOP-DOWN TIMEFRAMES
 // ============================================================
@@ -815,7 +733,6 @@ export function getTopDownTimeframes() {
     ...TOP_DOWN_TIMEFRAMES,
   ];
 }
-
 
 // ============================================================
 // COUNT CONFIRMED HTF CRT
@@ -834,16 +751,13 @@ export function countTopDownConfirmed(
     const timeframe of
     TOP_DOWN_TIMEFRAMES
   ) {
-    if (
-      topDown[timeframe]
-    ) {
+    if (topDown[timeframe]) {
       count++;
     }
   }
 
   return count;
 }
-
 
 // ============================================================
 // FORMAT TOP-DOWN COUNT
@@ -860,7 +774,6 @@ export function formatTopDownCount(
   return `${count}/4 CONFIRMED`;
 }
 
-
 // ============================================================
 // FORMAT SINGLE CRT
 // ============================================================
@@ -876,7 +789,6 @@ function formatSingleCRT(
     ? "BUY"
     : "SELL";
 }
-
 
 // ============================================================
 // FORMAT HTF CRT
@@ -916,11 +828,8 @@ export function formatHTFCRT(
     `15M ${formatSingleCRT(
       topDown["15m"]
     )}`,
-  ].join(
-    " • "
-  );
+  ].join(" • ");
 }
-
 
 // ============================================================
 // FORMAT HTF CRT DETAILS
@@ -939,7 +848,6 @@ export function formatHTFCRTDetails(
     topDown
   );
 }
-
 
 // ============================================================
 // BUILD TOP-DOWN CHAIN
@@ -996,7 +904,6 @@ export function buildTopDownChain(
       TOP_DOWN_TIMEFRAMES.length,
   };
 }
-
 
 // ============================================================
 // ANALYZE TOP-DOWN
@@ -1075,7 +982,6 @@ export function analyzeTopDown(
   };
 }
 
-
 // ============================================================
 // FORMAT TOP-DOWN DISPLAY
 // ============================================================
@@ -1130,11 +1036,8 @@ export function formatTopDownDisplay(
     `15M: ${formatSingleCRT(
       fifteen
     )}`,
-  ].join(
-    "\n"
-  );
+  ].join("\n");
 }
-
 
 // ============================================================
 // GET TOP-DOWN SUMMARY
@@ -1181,7 +1084,6 @@ export function getTopDownSummary(
   };
 }
 
-
 // ============================================================
 // CLEAR ONE SYMBOL
 // ============================================================
@@ -1208,7 +1110,6 @@ export function clearTopDownSymbol(
       normalizedSymbol
     );
 
-  // Delete persistent records asynchronously.
   for (
     const timeframe of
     TOP_DOWN_TIMEFRAMES
@@ -1219,14 +1120,11 @@ export function clearTopDownSymbol(
         timeframe
       );
 
-    void pgDb.delete(
-      key
-    );
+    void pgDb.delete(key);
   }
 
   return deleted;
 }
-
 
 // ============================================================
 // CLEAR ONE TIMEFRAME
@@ -1283,9 +1181,7 @@ export function clearTopDownTimeframe(
     )
   );
 
-  if (
-    symbolState.size === 0
-  ) {
+  if (symbolState.size === 0) {
     topDownState.delete(
       normalizedSymbol
     );
@@ -1293,7 +1189,6 @@ export function clearTopDownTimeframe(
 
   return deleted;
 }
-
 
 // ============================================================
 // CLEAR EVERYTHING
@@ -1348,7 +1243,6 @@ export async function clearAllTopDownState() {
   }
 }
 
-
 // ============================================================
 // GET STATE SIZE
 // ============================================================
@@ -1356,7 +1250,6 @@ export async function clearAllTopDownState() {
 export function getTopDownStateSize() {
   return topDownState.size;
 }
-
 
 // ============================================================
 // GET ALL SYMBOLS
@@ -1367,7 +1260,6 @@ export function getTopDownSymbols() {
     ...topDownState.keys(),
   ];
 }
-
 
 // ============================================================
 // DEBUG STATE
@@ -1393,9 +1285,7 @@ export function getTopDownDebugState() {
           timeframe
         );
 
-      result[symbol][
-        timeframe
-      ] =
+      result[symbol][timeframe] =
         signal
           ? {
               type:
@@ -1426,7 +1316,6 @@ export function getTopDownDebugState() {
   return result;
 }
 
-
 // ============================================================
 // GET PERSISTENCE STATUS
 // ============================================================
@@ -1434,7 +1323,6 @@ export function getTopDownDebugState() {
 export function isTopDownPersistenceLoaded() {
   return topDownPersistenceLoaded;
 }
-
 
 // ============================================================
 // GET DATABASE KEY FOR DEBUGGING
@@ -1465,7 +1353,6 @@ export function getTopDownPersistenceKey(
   );
 }
 
-
 // ============================================================
 // EXPORT CONSTANTS
 // ============================================================
@@ -1475,7 +1362,6 @@ export {
   LOWER_TIMEFRAME,
   ALL_TIMEFRAMES,
 };
-
 
 // ============================================================
 // SERVICE STARTUP
@@ -1510,4 +1396,3 @@ console.log(
 console.log(
   "[TOPDOWN] Rachel T fractal only: ENABLED"
 );
-
