@@ -18,7 +18,7 @@ export const botConfig = {
           "Custom Status",
 
         state:
-          "SAKAMOTO #1",
+          "BAKA DAN YAN",
 
         type:
           3,
