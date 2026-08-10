@@ -1,3 +1,4 @@
+```javascript
 import { EmbedBuilder } from 'discord.js';
 import botConfig from '../../config/bot.js';
 import { buildSignal } from './crtEngine.js';
@@ -56,7 +57,19 @@ const OVERBOUGHT = Number(
   CRT_CONFIG.rsi?.overbought || 70
 );
 
-const AUTO_SYMBOLS = CRT_CONFIG.autoSymbols !== false;
+const AUTO_SYMBOLS =
+  CRT_CONFIG.autoSymbols !== false;
+
+/*
+ * Number of previous closed candles used
+ * to identify previous liquidity.
+ *
+ * Keep this simple.
+ */
+const LIQUIDITY_LOOKBACK = Math.max(
+  3,
+  Number(CRT_CONFIG.liquidityLookback || 20)
+);
 
 let monitorStarted = false;
 let scanRunning = false;
@@ -117,7 +130,9 @@ function fmtPrice(value) {
 // ============================================================
 
 function formatRSIState(state) {
-  const normalized = String(state || 'Neutral').toUpperCase();
+  const normalized = String(
+    state || 'Neutral'
+  ).toUpperCase();
 
   if (normalized === 'OVERBOUGHT') {
     return '**OVERBOUGHT**';
@@ -165,7 +180,7 @@ function formatStdDeviation(signal) {
 // FRACTAL PRICE
 //
 // ONLY FRACTAL PRICE IS DISPLAYED.
-// SIGNAL PRICE IS COMPLETELY REMOVED.
+// SIGNAL PRICE IS NOT DISPLAYED.
 // ============================================================
 
 function formatFractalPrice(signal) {
@@ -195,17 +210,193 @@ function formatConfirmation(signal) {
 }
 
 // ============================================================
+// SIMPLE LIQUIDITY SWEEP DETECTION
+//
+// TOP FRACTAL:
+//
+//   Fractal Price > previous liquidity high
+//
+// BOTTOM FRACTAL:
+//
+//   Fractal Price < previous liquidity low
+//
+// We intentionally keep this simple.
+// No complicated liquidity zones.
+//
+// The previous liquidity is taken from the
+// previous closed candles only.
+// ============================================================
+
+function detectLiquiditySweep(
+  signal,
+  candles
+) {
+  const fractalPrice = Number(
+    signal.fractalPrice ??
+    signal.fractal?.price ??
+    signal.parentHigh ??
+    signal.parentLow
+  );
+
+  if (!Number.isFinite(fractalPrice)) {
+    return {
+      swept: false,
+      type: 'NONE',
+      label: 'None',
+      level: null,
+    };
+  }
+
+  if (
+    !Array.isArray(candles) ||
+    candles.length < 3
+  ) {
+    return {
+      swept: false,
+      type: 'NONE',
+      label: 'None',
+      level: null,
+    };
+  }
+
+  /*
+   * Determine whether this is a top or bottom
+   * fractal.
+   *
+   * We first use explicit fractal information
+   * from crtEngine when available.
+   */
+  const explicitFractalType = String(
+    signal.fractalType ??
+    signal.fractal?.type ??
+    signal.type ??
+    ''
+  ).toUpperCase();
+
+  const structure = String(
+    signal.marketStructure ||
+    signal.structure ||
+    signal.market_structure ||
+    ''
+  ).toUpperCase();
+
+  const isTopFractal =
+    explicitFractalType.includes('TOP') ||
+    explicitFractalType.includes('HIGH') ||
+    structure === 'BEARISH';
+
+  const isBottomFractal =
+    explicitFractalType.includes('BOTTOM') ||
+    explicitFractalType.includes('LOW') ||
+    structure === 'BULLISH';
+
+  /*
+   * Remove the latest candle from the liquidity
+   * search so we don't compare against the same
+   * candle that created the confirmation.
+   */
+  const previousCandles =
+    candles.slice(
+      0,
+      -1
+    );
+
+  if (!previousCandles.length) {
+    return {
+      swept: false,
+      type: 'NONE',
+      label: 'None',
+      level: null,
+    };
+  }
+
+  /*
+   * Only use the most recent liquidity lookback.
+   */
+  const liquidityCandles =
+    previousCandles.slice(
+      -LIQUIDITY_LOOKBACK
+    );
+
+  // ==========================================================
+  // PREVIOUS HIGH LIQUIDITY
+  // ==========================================================
+
+  if (isTopFractal) {
+    const previousHighs =
+      liquidityCandles
+        .map((c) => Number(c.high))
+        .filter(Number.isFinite);
+
+    if (previousHighs.length) {
+      const previousHigh =
+        Math.max(...previousHighs);
+
+      if (
+        fractalPrice >
+        previousHigh
+      ) {
+        return {
+          swept: true,
+          type: 'HIGH',
+          label:
+            '**PREVIOUS HIGH SWEPT**',
+          level: previousHigh,
+        };
+      }
+    }
+  }
+
+  // ==========================================================
+  // PREVIOUS LOW LIQUIDITY
+  // ==========================================================
+
+  if (isBottomFractal) {
+    const previousLows =
+      liquidityCandles
+        .map((c) => Number(c.low))
+        .filter(Number.isFinite);
+
+    if (previousLows.length) {
+      const previousLow =
+        Math.min(...previousLows);
+
+      if (
+        fractalPrice <
+        previousLow
+      ) {
+        return {
+          swept: true,
+          type: 'LOW',
+          label:
+            '**PREVIOUS LOW SWEPT**',
+          level: previousLow,
+        };
+      }
+    }
+  }
+
+  return {
+    swept: false,
+    type: 'NONE',
+    label: 'None',
+    level: null,
+  };
+}
+
+// ============================================================
 // SIGNAL COLOR
 //
-// BUY / SELL IS NO LONGER DISPLAYED.
-// COLOR IS ONLY USED FOR THE CONFIRMATION EMBED.
+// BUY / SELL IS NOT DISPLAYED.
+// Color is based on market structure.
 // ============================================================
 
 function signalColor(signal) {
   const structure = String(
     signal.marketStructure ||
-      signal.structure ||
-      ''
+    signal.structure ||
+    signal.market_structure ||
+    ''
   ).toUpperCase();
 
   if (structure === 'BULLISH') {
@@ -227,22 +418,24 @@ function signalColor(signal) {
 // 🟢 BTC
 //
 // PDYN CRT CONFIRMATION
+//
 // Source: MEXC Exchange
 // Timeframe: 5 MINUTES
 // Market Structure: Bullish
 // STD Deviation: 1.82
 // Fractal Price: 112,300.00
+// Liquidity: PREVIOUS LOW SWEPT
 // CONFIRM CRT Candle: CONFIRMED
 // RSI: OVERSOLD
 //
 // ============================================================
 
 function createSignalEmbed(signal) {
-  const structure = formatMarketStructure(signal);
+  const structure =
+    formatMarketStructure(signal);
 
-  const structureUpper = String(
-    structure
-  ).toUpperCase();
+  const structureUpper =
+    String(structure).toUpperCase();
 
   const emoji =
     structureUpper === 'BULLISH'
@@ -251,17 +444,31 @@ function createSignalEmbed(signal) {
         ? '🔴'
         : '🟡';
 
+  /*
+   * Convert:
+   *
+   * BTC_USDT -> BTC
+   * BTC-USDT -> BTC
+   * BTCUSDT  -> BTC
+   * BTC_USD  -> BTC
+   * BTCUSD   -> BTC
+   */
   const coin = String(
     signal.symbol || 'UNKNOWN'
   )
-    .replace(/[_-]USDT$/i, '')
+    .replace(/[-_]USDT$/i, '')
     .replace(/USDT$/i, '')
-    .replace(/[_-]USD$/i, '')
+    .replace(/[-_]USD$/i, '')
     .replace(/USD$/i, '');
 
-  const rsiState = formatRSIState(
-    signal.rsiState
-  );
+  const rsiState =
+    formatRSIState(
+      signal.rsiState
+    );
+
+  const liquidity =
+    signal.liquiditySweep?.label ||
+    'None';
 
   return new EmbedBuilder()
 
@@ -294,9 +501,10 @@ function createSignalEmbed(signal) {
 
       {
         name: 'Timeframe',
-        value: timeframeLabel(
-          signal.timeframe
-        ),
+        value:
+          timeframeLabel(
+            signal.timeframe
+          ),
         inline: true,
       },
 
@@ -308,19 +516,34 @@ function createSignalEmbed(signal) {
 
       {
         name: 'STD Deviation',
-        value: formatStdDeviation(signal),
+        value:
+          formatStdDeviation(
+            signal
+          ),
         inline: true,
       },
 
       {
         name: 'Fractal Price',
-        value: formatFractalPrice(signal),
+        value:
+          formatFractalPrice(
+            signal
+          ),
+        inline: true,
+      },
+
+      {
+        name: 'Liquidity',
+        value: liquidity,
         inline: true,
       },
 
       {
         name: 'CONFIRM CRT Candle',
-        value: formatConfirmation(signal),
+        value:
+          formatConfirmation(
+            signal
+          ),
         inline: true,
       },
 
@@ -344,7 +567,8 @@ function createSignalEmbed(signal) {
     // ========================================================
 
     .setFooter({
-      text: 'PDYN • CRT • MEXC Exchange',
+      text:
+        'PDYN • CRT • MEXC Exchange',
     })
 
     // ========================================================
@@ -352,7 +576,9 @@ function createSignalEmbed(signal) {
     // ========================================================
 
     .setTimestamp(
-      new Date(signal.candleTime)
+      new Date(
+        signal.candleTime
+      )
     );
 }
 
@@ -360,9 +586,14 @@ function createSignalEmbed(signal) {
 // SEND SIGNAL
 // ============================================================
 
-async function sendSignal(client, signal) {
+async function sendSignal(
+  client,
+  signal
+) {
   const channelId =
-    CHANNELS[signal.timeframe];
+    CHANNELS[
+      signal.timeframe
+    ];
 
   if (!channelId) {
     console.warn(
@@ -372,20 +603,25 @@ async function sendSignal(client, signal) {
   }
 
   const channel =
-    await client.channels.fetch(channelId);
+    await client.channels.fetch(
+      channelId
+    );
 
   if (
     !channel ||
-    typeof channel.send !== 'function'
+    typeof channel.send !==
+      'function'
   ) {
     return;
   }
 
-  const structure = String(
-    signal.marketStructure ||
+  const structure =
+    String(
+      signal.marketStructure ||
       signal.structure ||
+      signal.market_structure ||
       ''
-  ).toUpperCase();
+    ).toUpperCase();
 
   const emoji =
     structure === 'BULLISH'
@@ -397,16 +633,19 @@ async function sendSignal(client, signal) {
   const coin = String(
     signal.symbol || 'UNKNOWN'
   )
-    .replace(/[_-]USDT$/i, '')
+    .replace(/[-_]USDT$/i, '')
     .replace(/USDT$/i, '')
-    .replace(/[_-]USD$/i, '')
+    .replace(/[-_]USD$/i, '')
     .replace(/USD$/i, '');
 
   await channel.send({
     content:
       `${emoji} **${coin.toUpperCase()}**`,
+
     embeds: [
-      createSignalEmbed(signal),
+      createSignalEmbed(
+        signal
+      ),
     ],
   });
 }
@@ -415,9 +654,14 @@ async function sendSignal(client, signal) {
 // FILTER SYMBOLS
 // ============================================================
 
-function filterSymbols(symbols, market) {
+function filterSymbols(
+  symbols,
+  market
+) {
   const configured =
-    getConfiguredSymbols(market);
+    getConfiguredSymbols(
+      market
+    );
 
   if (configured.length) {
     return configured.slice(
@@ -426,36 +670,49 @@ function filterSymbols(symbols, market) {
     );
   }
 
-  const quote = String(
-    CRT_CONFIG.quoteAsset || 'USDT'
-  ).toUpperCase();
+  const quote =
+    String(
+      CRT_CONFIG.quoteAsset ||
+        'USDT'
+    ).toUpperCase();
 
-  const filtered = symbols.filter((s) => {
-    const symbol =
-      typeof s === 'string'
-        ? s
-        : s.symbol;
+  const filtered =
+    symbols.filter((s) => {
+      const symbol =
+        typeof s === 'string'
+          ? s
+          : s.symbol;
 
-    if (!symbol) {
-      return false;
-    }
+      if (!symbol) {
+        return false;
+      }
 
-    if (market === 'futures') {
-      return (
-        String(
-          s.quoteCoin || ''
-        ).toUpperCase() === quote ||
-        symbol.endsWith(
-          `_${quote}`
-        )
+      if (
+        market ===
+        'futures'
+      ) {
+        return (
+          String(
+            s.quoteCoin ||
+              ''
+          ).toUpperCase() ===
+            quote ||
+          symbol.endsWith(
+            `_${quote}`
+          )
+        );
+      }
+
+      return symbol.endsWith(
+        quote
       );
-    }
-
-    return symbol.endsWith(quote);
-  });
+    });
 
   return filtered
-    .slice(0, MAX_SYMBOLS)
+    .slice(
+      0,
+      MAX_SYMBOLS
+    )
     .map((s) =>
       typeof s === 'string'
         ? s
@@ -470,10 +727,11 @@ function filterSymbols(symbols, market) {
 async function refreshSymbols(
   force = false
 ) {
-  const ttl = Number(
-    CRT_CONFIG.symbolRefreshMs ||
-      15 * 60 * 1000
-  );
+  const ttl =
+    Number(
+      CRT_CONFIG.symbolRefreshMs ||
+        15 * 60 * 1000
+    );
 
   if (
     !force &&
@@ -486,10 +744,14 @@ async function refreshSymbols(
   }
 
   for (
-    const market of MARKET_TYPES
+    const market of
+    MARKET_TYPES
   ) {
     try {
-      if (market === 'futures') {
+      if (
+        market ===
+        'futures'
+      ) {
         const contracts =
           await getFuturesContracts();
 
@@ -515,7 +777,9 @@ async function refreshSymbols(
 
       console.log(
         `[CRT] ${market} symbols: ${
-          cachedSymbols.get(market) || []
+          cachedSymbols.get(
+            market
+          ) || []
         }`
       );
     } catch (error) {
@@ -546,17 +810,21 @@ async function scanSymbol(
         market,
         symbol,
         timeframe,
-        limit: KLINE_LIMIT,
+        limit:
+          KLINE_LIMIT,
       });
 
-    // Never use the still-forming candle
-    // for a confirmed signal.
+    // ========================================================
+    // NEVER USE THE STILL-FORMING CANDLE
+    // ========================================================
 
     const closed =
       candles.filter(
         (c) =>
           c.closed &&
-          Number.isFinite(c.close)
+          Number.isFinite(
+            c.close
+          )
       );
 
     if (
@@ -565,6 +833,10 @@ async function scanSymbol(
     ) {
       return;
     }
+
+    // ========================================================
+    // BUILD CRT SIGNAL
+    // ========================================================
 
     const signal =
       buildSignal({
@@ -584,34 +856,72 @@ async function scanSymbol(
 
         crtOptions: {
           requireCloseInside:
-            CRT_CONFIG.requireCloseInside !==
+            CRT_CONFIG
+              .requireCloseInside !==
             false,
 
           useCloseDirection:
-            CRT_CONFIG.useCloseDirection ===
+            CRT_CONFIG
+              .useCloseDirection ===
             true,
 
           minBodyRatio:
             Number(
-              CRT_CONFIG.minBodyRatio || 0
+              CRT_CONFIG
+                .minBodyRatio ||
+                0
             ),
         },
       });
 
+    if (!signal) {
+      return;
+    }
+
+    // ========================================================
+    // LIQUIDITY SWEEP
+    //
+    // Detect whether the confirmed fractal price
+    // swept previous liquidity.
+    // ========================================================
+
+    signal.liquiditySweep =
+      detectLiquiditySweep(
+        signal,
+        closed
+      );
+
+    // ========================================================
+    // NEW SIGNAL CHECK
+    // ========================================================
+
     if (
-      !signal ||
-      !isNewSignal(signal.id)
+      !isNewSignal(
+        signal.id
+      )
     ) {
       return;
     }
+
+    // ========================================================
+    // SEND DISCORD ALERT
+    // ========================================================
 
     await sendSignal(
       client,
       signal
     );
 
+    // ========================================================
+    // LOG
+    // ========================================================
+
     console.log(
-      `[CRT] CONFIRMED ${market}:${symbol} ${timeframe} | Structure=${signal.marketStructure || 'N/A'} | Fractal=${signal.fractalPrice || 'N/A'} | RSI=${signal.rsiState || 'N/A'}`
+      `[CRT] CONFIRMED ${market}:${symbol} ${timeframe}` +
+      ` | Structure=${signal.marketStructure || 'N/A'}` +
+      ` | Fractal=${signal.fractalPrice || 'N/A'}` +
+      ` | Liquidity=${signal.liquiditySweep?.label || 'None'}` +
+      ` | RSI=${signal.rsiState || 'N/A'}`
     );
   } catch (error) {
     console.error(
@@ -625,7 +935,9 @@ async function scanSymbol(
 // SCAN ALL
 // ============================================================
 
-async function scanAll(client) {
+async function scanAll(
+  client
+) {
   if (scanRunning) {
     return;
   }
@@ -635,12 +947,17 @@ async function scanAll(client) {
   try {
     await refreshSymbols();
 
-    // Sequential requests are intentional
-    // to stay well below MEXC rate limits.
+    // ========================================================
+    // SEQUENTIAL REQUESTS
+    //
+    // Intentional to stay well below MEXC rate limits.
+    // ========================================================
 
     for (
       const timeframe of
-      Object.keys(TIMEFRAMES)
+      Object.keys(
+        TIMEFRAMES
+      )
     ) {
       for (
         const market of
@@ -652,7 +969,8 @@ async function scanAll(client) {
           ) || [];
 
         for (
-          const symbol of symbols
+          const symbol of
+          symbols
         ) {
           await scanSymbol(
             client,
@@ -680,8 +998,10 @@ export function startCRTMonitor(
   }
 
   if (
-    CRT_CONFIG.enabled === false ||
-    CRT_CONFIG.autoAlerts === false
+    CRT_CONFIG.enabled ===
+      false ||
+    CRT_CONFIG.autoAlerts ===
+      false
   ) {
     console.log(
       '[CRT] Signal monitor disabled by configuration.'
@@ -714,10 +1034,19 @@ export function startCRTMonitor(
     `[CRT] Scan interval: ${SCAN_INTERVAL}ms; max symbols/market: ${MAX_SYMBOLS}`
   );
 
-  void scanAll(client);
+  console.log(
+    `[CRT] Liquidity lookback: ${LIQUIDITY_LOOKBACK} candles`
+  );
+
+  void scanAll(
+    client
+  );
 
   setInterval(
-    () => void scanAll(client),
+    () =>
+      void scanAll(
+        client
+      ),
     SCAN_INTERVAL
   );
 }
@@ -729,7 +1058,9 @@ export function startCRTMonitor(
 export async function scanCRTNow(
   client
 ) {
-  await scanAll(client);
+  await scanAll(
+    client
+  );
 }
 
 // ============================================================
@@ -738,10 +1069,13 @@ export async function scanCRTNow(
 
 export function getCRTConfig() {
   return {
-    markets: MARKET_TYPES,
+    markets:
+      MARKET_TYPES,
 
     timeframes:
-      Object.keys(TIMEFRAMES),
+      Object.keys(
+        TIMEFRAMES
+      ),
 
     scanInterval:
       SCAN_INTERVAL,
@@ -749,10 +1083,18 @@ export function getCRTConfig() {
     maxSymbolsPerMarket:
       MAX_SYMBOLS,
 
+    liquidityLookback:
+      LIQUIDITY_LOOKBACK,
+
     rsi: {
-      period: RSI_PERIOD,
-      oversold: OVERSOLD,
-      overbought: OVERBOUGHT,
+      period:
+        RSI_PERIOD,
+
+      oversold:
+        OVERSOLD,
+
+      overbought:
+        OVERBOUGHT,
     },
   };
 }
@@ -764,3 +1106,4 @@ export function getCRTConfig() {
 console.log(
   `[CRT] Service loaded • ${Object.keys(TIMEFRAMES).join(', ')}`
 );
+```
