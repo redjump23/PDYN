@@ -22,6 +22,8 @@
 //   • Store the latest confirmed Rachel T fractal.
 //   • Store separately for every symbol.
 //   • Store separately for every timeframe.
+//   • Save confirmed HTF fractals to PostgreSQL.
+//   • Load previous HTF fractals from PostgreSQL on startup.
 //   • If no NEW fractal is found, keep the previous one.
 //   • If the API/data has a temporary problem, keep the
 //     previous stored fractal.
@@ -43,6 +45,8 @@
 // used by the top-down system.
 //
 // ============================================================
+
+import { pgDb } from "../../utils/postgresDatabase.js";
 
 
 // ============================================================
@@ -75,7 +79,7 @@ const ALL_TIMEFRAMES = [
 
 
 // ============================================================
-// PERSISTENT STATE
+// IN-MEMORY STATE
 // ============================================================
 //
 // Structure:
@@ -90,14 +94,40 @@ const ALL_TIMEFRAMES = [
 //   1h  -> SELL
 //   15m -> BUY
 //
-// IMPORTANT:
-//
-// This state persists for the lifetime of the Node.js process.
-// It is intentionally NOT cleared during normal scanning.
+// PostgreSQL is the permanent backup.
+// Memory is used for fast access during runtime.
 //
 // ============================================================
 
 const topDownState = new Map();
+
+
+// ============================================================
+// DATABASE PREFIX
+// ============================================================
+//
+// Each CRT state is stored separately:
+//
+// temp:crt_topdown:BTC_USDT:1d
+// temp:crt_topdown:BTC_USDT:4h
+// temp:crt_topdown:BTC_USDT:1h
+// temp:crt_topdown:BTC_USDT:15m
+//
+// No TTL is used.
+//
+// Therefore the records survive Railway restarts.
+//
+// ============================================================
+
+const TOPDOWN_DB_PREFIX =
+  "temp:crt_topdown";
+
+
+// ============================================================
+// DATABASE LOAD STATE
+// ============================================================
+
+let topDownPersistenceLoaded = false;
 
 
 // ============================================================
@@ -119,6 +149,22 @@ function normalizeTimeframe(timeframe) {
   return String(timeframe || "")
     .trim()
     .toLowerCase();
+}
+
+
+// ============================================================
+// BUILD DATABASE KEY
+// ============================================================
+
+function getTopDownDatabaseKey(
+  symbol,
+  timeframe
+) {
+  return (
+    `${TOPDOWN_DB_PREFIX}:` +
+    `${normalizeSymbol(symbol)}:` +
+    `${normalizeTimeframe(timeframe)}`
+  );
 }
 
 
@@ -287,6 +333,257 @@ function normalizeSignal(
 
 
 // ============================================================
+// SAVE CRT TO POSTGRESQL
+// ============================================================
+//
+// Saves one confirmed HTF CRT.
+//
+// No TTL is supplied.
+//
+// Therefore this record remains in PostgreSQL until explicitly
+// replaced or deleted.
+//
+// ============================================================
+
+async function saveTopDownCRTToDatabase(
+  signal
+) {
+  try {
+    if (!pgDb.isAvailable()) {
+      console.warn(
+        "[TOPDOWN] PostgreSQL unavailable. " +
+        "CRT remains in memory only."
+      );
+
+      return false;
+    }
+
+    if (!signal) {
+      return false;
+    }
+
+    if (
+      !isTopDownTimeframe(
+        signal.timeframe
+      )
+    ) {
+      return false;
+    }
+
+    const key =
+      getTopDownDatabaseKey(
+        signal.symbol,
+        signal.timeframe
+      );
+
+    const saved =
+      await pgDb.set(
+        key,
+        signal
+      );
+
+    if (saved) {
+      console.log(
+        `[TOPDOWN] PostgreSQL saved ` +
+        `${signal.symbol} ` +
+        `${signal.timeframe.toUpperCase()} ` +
+        `${signal.type} fractal`
+      );
+    }
+
+    return saved;
+  } catch (error) {
+    console.error(
+      "[TOPDOWN] PostgreSQL save failed:",
+      error.message
+    );
+
+    return false;
+  }
+}
+
+
+// ============================================================
+// LOAD ALL CRT STATE FROM POSTGRESQL
+// ============================================================
+//
+// This function is called during CRT startup.
+//
+// It restores the latest stored HTF fractals BEFORE normal
+// CRT scanning begins.
+//
+// ============================================================
+
+export async function loadTopDownPersistence() {
+  if (topDownPersistenceLoaded) {
+    return true;
+  }
+
+  try {
+    if (!pgDb.isAvailable()) {
+      console.warn(
+        "[TOPDOWN] PostgreSQL unavailable during startup."
+      );
+
+      console.warn(
+        "[TOPDOWN] Starting with memory-only CRT state."
+      );
+
+      return false;
+    }
+
+    console.log(
+      "[TOPDOWN] Loading persistent CRT state from PostgreSQL..."
+    );
+
+    const keys =
+      await pgDb.list(
+        TOPDOWN_DB_PREFIX
+      );
+
+    let loaded = 0;
+
+    for (const key of keys) {
+      try {
+        if (
+          !key.startsWith(
+            `${TOPDOWN_DB_PREFIX}:`
+          )
+        ) {
+          continue;
+        }
+
+        const prefix =
+          `${TOPDOWN_DB_PREFIX}:`;
+
+        const remainder =
+          key.slice(
+            prefix.length
+          );
+
+        const separatorIndex =
+          remainder.lastIndexOf(":");
+
+        if (
+          separatorIndex <= 0 ||
+          separatorIndex >=
+            remainder.length - 1
+        ) {
+          continue;
+        }
+
+        const symbol =
+          normalizeSymbol(
+            remainder.slice(
+              0,
+              separatorIndex
+            )
+          );
+
+        const timeframe =
+          normalizeTimeframe(
+            remainder.slice(
+              separatorIndex + 1
+            )
+          );
+
+        if (
+          !symbol ||
+          !isTopDownTimeframe(
+            timeframe
+          )
+        ) {
+          continue;
+        }
+
+        const signal =
+          await pgDb.get(
+            key,
+            null
+          );
+
+        if (!signal) {
+          continue;
+        }
+
+        const normalizedSignal =
+          normalizeSignal(
+            symbol,
+            timeframe,
+            signal
+          );
+
+        if (!normalizedSignal) {
+          console.warn(
+            `[TOPDOWN] Invalid database CRT ignored: ` +
+            `${symbol} ${timeframe}`
+          );
+
+          continue;
+        }
+
+        const symbolState =
+          getSymbolState(
+            symbol
+          );
+
+        if (!symbolState) {
+          continue;
+        }
+
+        const previous =
+          symbolState.get(
+            timeframe
+          );
+
+        if (
+          !previous ||
+          normalizedSignal.timestamp >
+            previous.timestamp
+        ) {
+          symbolState.set(
+            timeframe,
+            normalizedSignal
+          );
+
+          loaded++;
+
+          console.log(
+            `[TOPDOWN] Restored ${symbol} ` +
+            `${timeframe.toUpperCase()} ` +
+            `${normalizedSignal.type} fractal ` +
+            `from PostgreSQL`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[TOPDOWN] Failed to restore database key ${key}:`,
+          error.message
+        );
+      }
+    }
+
+    topDownPersistenceLoaded =
+      true;
+
+    console.log(
+      `[TOPDOWN] PostgreSQL state loaded: ` +
+      `${loaded} CRT records`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "[TOPDOWN] PostgreSQL load failed:",
+      error.message
+    );
+
+    return false;
+  }
+}
+
+
+// ============================================================
 // STORE CRT
 // ============================================================
 //
@@ -294,6 +591,11 @@ function normalizeSignal(
 // is newer.
 //
 // Older/equal fractals are ignored.
+//
+// Every accepted new fractal is:
+//
+//   1. Stored in memory.
+//   2. Saved to PostgreSQL.
 //
 // ============================================================
 
@@ -359,6 +661,10 @@ export function updateTopDownCRT(
       `${normalizedSignal.type} fractal`
     );
 
+    void saveTopDownCRTToDatabase(
+      normalizedSignal
+    );
+
     return true;
   }
 
@@ -388,6 +694,10 @@ export function updateTopDownCRT(
     `[TOPDOWN] Updated ${normalizedSymbol} ` +
     `${normalizedTimeframe.toUpperCase()} ` +
     `${normalizedSignal.type} fractal`
+  );
+
+  void saveTopDownCRTToDatabase(
+    normalizedSignal
   );
 
   return true;
@@ -878,6 +1188,8 @@ export function getTopDownSummary(
 // Deliberate operation only.
 // Normal scanning NEVER clears HTF state.
 //
+// Also removes the symbol's persistent database records.
+//
 // ============================================================
 
 export function clearTopDownSymbol(
@@ -890,14 +1202,37 @@ export function clearTopDownSymbol(
     return false;
   }
 
-  return topDownState.delete(
-    normalizedSymbol
-  );
+  const deleted =
+    topDownState.delete(
+      normalizedSymbol
+    );
+
+  // Delete persistent records asynchronously.
+  for (
+    const timeframe of
+    TOP_DOWN_TIMEFRAMES
+  ) {
+    const key =
+      getTopDownDatabaseKey(
+        normalizedSymbol,
+        timeframe
+      );
+
+    void pgDb.delete(
+      key
+    );
+  }
+
+  return deleted;
 }
 
 
 // ============================================================
 // CLEAR ONE TIMEFRAME
+// ============================================================
+//
+// Deliberate operation only.
+//
 // ============================================================
 
 export function clearTopDownTimeframe(
@@ -925,6 +1260,13 @@ export function clearTopDownTimeframe(
     );
 
   if (!symbolState) {
+    void pgDb.delete(
+      getTopDownDatabaseKey(
+        normalizedSymbol,
+        normalizedTimeframe
+      )
+    );
+
     return false;
   }
 
@@ -932,6 +1274,13 @@ export function clearTopDownTimeframe(
     symbolState.delete(
       normalizedTimeframe
     );
+
+  void pgDb.delete(
+    getTopDownDatabaseKey(
+      normalizedSymbol,
+      normalizedTimeframe
+    )
+  );
 
   if (
     symbolState.size === 0
@@ -953,10 +1302,49 @@ export function clearTopDownTimeframe(
 //
 // DO NOT call during normal scans.
 //
+// This removes both memory state and persistent database state.
+//
 // ============================================================
 
-export function clearAllTopDownState() {
+export async function clearAllTopDownState() {
   topDownState.clear();
+
+  try {
+    if (!pgDb.isAvailable()) {
+      return false;
+    }
+
+    const keys =
+      await pgDb.list(
+        TOPDOWN_DB_PREFIX
+      );
+
+    let deleted = 0;
+
+    for (const key of keys) {
+      const result =
+        await pgDb.delete(
+          key
+        );
+
+      if (result) {
+        deleted++;
+      }
+    }
+
+    console.log(
+      `[TOPDOWN] Cleared ${deleted} persistent CRT records.`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "[TOPDOWN] Failed to clear persistent CRT state:",
+      error.message
+    );
+
+    return false;
+  }
 }
 
 
@@ -1039,6 +1427,45 @@ export function getTopDownDebugState() {
 
 
 // ============================================================
+// GET PERSISTENCE STATUS
+// ============================================================
+
+export function isTopDownPersistenceLoaded() {
+  return topDownPersistenceLoaded;
+}
+
+
+// ============================================================
+// GET DATABASE KEY FOR DEBUGGING
+// ============================================================
+
+export function getTopDownPersistenceKey(
+  symbol,
+  timeframe
+) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  const normalizedTimeframe =
+    normalizeTimeframe(timeframe);
+
+  if (
+    !normalizedSymbol ||
+    !isTopDownTimeframe(
+      normalizedTimeframe
+    )
+  ) {
+    return null;
+  }
+
+  return getTopDownDatabaseKey(
+    normalizedSymbol,
+    normalizedTimeframe
+  );
+}
+
+
+// ============================================================
 // EXPORT CONSTANTS
 // ============================================================
 
@@ -1068,6 +1495,10 @@ console.log(
 );
 
 console.log(
+  "[TOPDOWN] PostgreSQL persistence: ENABLED"
+);
+
+console.log(
   "[TOPDOWN] Persistent previous fractal: ENABLED"
 );
 
@@ -1078,3 +1509,4 @@ console.log(
 console.log(
   "[TOPDOWN] Rachel T fractal only: ENABLED"
 );
+```
