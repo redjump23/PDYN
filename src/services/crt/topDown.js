@@ -1,3 +1,4 @@
+```js
 // ============================================================
 // PDYN CRT TOP-DOWN SERVICE
 // ============================================================
@@ -86,12 +87,6 @@ const ALL_TIMEFRAMES = [
 //   1h  -> SELL
 //   15m -> BUY
 //
-// ETH_USDT
-//   1d  -> SELL
-//   4h  -> BUY
-//   1h  -> BUY
-//   15m -> SELL
-//
 // ============================================================
 
 const topDownState = new Map();
@@ -120,7 +115,7 @@ function normalizeTimeframe(timeframe) {
 // CHECK HTF
 // ============================================================
 
-function isTopDownTimeframe(timeframe) {
+export function isTopDownTimeframe(timeframe) {
   return TOP_DOWN_TIMEFRAMES.includes(
     normalizeTimeframe(timeframe)
   );
@@ -166,7 +161,7 @@ function getSymbolState(symbol) {
 //
 // Accepts the signal object produced by crtService.js.
 //
-// We intentionally preserve useful Rachel T information:
+// Preserves:
 //
 //   type
 //   fractalType
@@ -202,22 +197,16 @@ function normalizeSignal(
   }
 
   const timestamp =
-    Number(
-      signal.timestamp
-    );
+    Number(signal.timestamp);
 
   if (
-    !Number.isFinite(
-      timestamp
-    )
+    !Number.isFinite(timestamp)
   ) {
     return null;
   }
 
   const type =
-    String(
-      signal.type || ""
-    )
+    String(signal.type || "")
       .trim()
       .toUpperCase();
 
@@ -241,19 +230,13 @@ function normalizeSignal(
       .toUpperCase();
 
   const price =
-    Number(
-      signal.price
-    );
+    Number(signal.price);
 
   const fractalPrice =
-    Number(
-      signal.fractalPrice
-    );
+    Number(signal.fractalPrice);
 
   const volume =
-    Number(
-      signal.volume
-    );
+    Number(signal.volume);
 
   return {
     symbol:
@@ -269,23 +252,17 @@ function normalizeSignal(
     timestamp,
 
     price:
-      Number.isFinite(
-        price
-      )
+      Number.isFinite(price)
         ? price
         : null,
 
     fractalPrice:
-      Number.isFinite(
-        fractalPrice
-      )
+      Number.isFinite(fractalPrice)
         ? fractalPrice
         : null,
 
     volume:
-      Number.isFinite(
-        volume
-      )
+      Number.isFinite(volume)
         ? volume
         : 0,
 
@@ -298,17 +275,10 @@ function normalizeSignal(
 // STORE CRT
 // ============================================================
 //
-// IMPORTANT:
-//
-// We ONLY replace the stored CRT when the incoming fractal
+// ONLY replace the stored CRT when the incoming fractal
 // is newer.
 //
-// If the incoming signal is older or equal:
-//
-//   DO NOTHING.
-//
-// This prevents historical/temporary scan issues from
-// overwriting a valid stored HTF CRT.
+// Older/equal fractals are ignored.
 //
 // ============================================================
 
@@ -368,7 +338,9 @@ export function updateTopDownCRT(
     );
 
     console.log(
-      `[TOPDOWN] Stored ${normalizedSymbol} ${normalizedTimeframe.toUpperCase()} ${normalizedSignal.type} fractal`
+      `[TOPDOWN] Stored ${normalizedSymbol} ` +
+      `${normalizedTimeframe.toUpperCase()} ` +
+      `${normalizedSignal.type} fractal`
     );
 
     return true;
@@ -395,7 +367,9 @@ export function updateTopDownCRT(
   );
 
   console.log(
-    `[TOPDOWN] Updated ${normalizedSymbol} ${normalizedTimeframe.toUpperCase()} ${normalizedSignal.type} fractal`
+    `[TOPDOWN] Updated ${normalizedSymbol} ` +
+    `${normalizedTimeframe.toUpperCase()} ` +
+    `${normalizedSignal.type} fractal`
   );
 
   return true;
@@ -477,9 +451,7 @@ export function getStoredTopDownState(
       );
 
     if (signal) {
-      result[
-        timeframe
-      ] = {
+      result[timeframe] = {
         ...signal,
       };
     }
@@ -514,12 +486,6 @@ export function getTopDownTimeframes() {
 // ============================================================
 // COUNT CONFIRMED HTF CRT
 // ============================================================
-//
-// Maximum:
-//
-//   4 / 4
-//
-// ============================================================
 
 export function countTopDownConfirmed(
   topDown
@@ -535,9 +501,7 @@ export function countTopDownConfirmed(
     TOP_DOWN_TIMEFRAMES
   ) {
     if (
-      topDown[
-        timeframe
-      ]
+      topDown[timeframe]
     ) {
       count++;
     }
@@ -572,12 +536,9 @@ function formatSingleCRT(
     return "N/A";
   }
 
-  const type =
-    signal.type === "BUY"
-      ? "BUY"
-      : "SELL";
-
-  return type;
+  return signal.type === "BUY"
+    ? "BUY"
+    : "SELL";
 }
 
 // ============================================================
@@ -587,10 +548,6 @@ function formatSingleCRT(
 // Example:
 //
 // 1D BUY • 4H BUY • 1H SELL • 15M BUY
-//
-// If data has not been stored yet:
-//
-// 1D N/A • 4H N/A • ...
 //
 // ============================================================
 
@@ -628,16 +585,30 @@ export function formatHTFCRT(
 }
 
 // ============================================================
+// FORMAT HTF CRT DETAILS
+// ============================================================
+//
+// Kept as an alias because crtService.js imports:
+//
+//   formatHTFCRTDetails
+//
+// ============================================================
+
+export function formatHTFCRTDetails(
+  topDown
+) {
+  return formatHTFCRT(
+    topDown
+  );
+}
+
+// ============================================================
 // BUILD TOP-DOWN CHAIN
 // ============================================================
 //
-// This creates the object consumed by the 5M signal.
+// 5M reads the latest STORED HTF fractals.
 //
-// IMPORTANT:
-//
-// The 5M signal does NOT need a fresh HTF fractal.
-//
-// It simply reads the latest stored confirmed HTF fractals.
+// It does NOT require fresh HTF fractals.
 //
 // ============================================================
 
@@ -650,6 +621,11 @@ export function buildTopDownChain(
   const state =
     getStoredTopDownState(
       normalizedSymbol
+    );
+
+  const confirmed =
+    countTopDownConfirmed(
+      state
     );
 
   return {
@@ -668,23 +644,16 @@ export function buildTopDownChain(
     "15m":
       state["15m"],
 
-    confirmed:
-      countTopDownConfirmed(
-        state
-      ),
+    confirmed,
 
     total:
       TOP_DOWN_TIMEFRAMES.length,
 
     confirmedCount:
-      countTopDownConfirmed(
-        state
-      ),
+      confirmed,
 
     isComplete:
-      countTopDownConfirmed(
-        state
-      ) ===
+      confirmed ===
       TOP_DOWN_TIMEFRAMES.length,
   };
 }
@@ -694,9 +663,6 @@ export function buildTopDownChain(
 // ============================================================
 //
 // Called when a 5M Rachel T fractal is detected.
-//
-// The current 5M signal is passed in only so the result can
-// identify the current 5M direction.
 //
 // HTF confirmation comes ONLY from stored Rachel T fractals.
 //
@@ -772,10 +738,6 @@ export function analyzeTopDown(
 // ============================================================
 // FORMAT TOP-DOWN DISPLAY
 // ============================================================
-//
-// Human-readable display for logging/debugging.
-//
-// ============================================================
 
 export function formatTopDownDisplay(
   topDown
@@ -793,8 +755,8 @@ export function formatTopDownDisplay(
   const confirmed =
     Number(
       topDown.confirmedCount ??
-      topDown.confirmed ??
-      0
+        topDown.confirmed ??
+        0
     );
 
   const daily =
@@ -835,10 +797,6 @@ export function formatTopDownDisplay(
 // ============================================================
 // GET TOP-DOWN SUMMARY
 // ============================================================
-//
-// Useful for commands/debugging.
-//
-// ============================================================
 
 export function getTopDownSummary(
   symbol
@@ -874,6 +832,7 @@ export function getTopDownSummary(
         ...state,
 
         confirmed,
+
         confirmedCount:
           confirmed,
       }),
@@ -884,7 +843,7 @@ export function getTopDownSummary(
 // CLEAR ONE SYMBOL
 // ============================================================
 //
-// This should only be called deliberately.
+// Deliberate operation only.
 // Normal scanning NEVER clears HTF state.
 //
 // ============================================================
@@ -906,12 +865,6 @@ export function clearTopDownSymbol(
 
 // ============================================================
 // CLEAR ONE TIMEFRAME
-// ============================================================
-//
-// Deliberately clears one stored CRT.
-//
-// The normal CRT scanner does NOT call this.
-//
 // ============================================================
 
 export function clearTopDownTimeframe(
@@ -962,9 +915,9 @@ export function clearTopDownTimeframe(
 // CLEAR EVERYTHING
 // ============================================================
 //
-// Deliberately clears all stored state.
+// Deliberate operation only.
 //
-// DO NOT call this during normal scans.
+// DO NOT call during normal scans.
 //
 // ============================================================
 
@@ -1086,3 +1039,4 @@ console.log(
 console.log(
   "[TOPDOWN] Rachel T fractal only: ENABLED"
 );
+```
