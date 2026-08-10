@@ -127,11 +127,6 @@ const TIMEFRAMES = {
 // ============================================================
 // SCAN PRIORITY
 // ============================================================
-//
-// Higher timeframes are processed before lower timeframes
-// when they close at the same boundary.
-//
-// ============================================================
 
 const SCAN_PRIORITY = [
   "1d",
@@ -272,7 +267,6 @@ const startupBaseline =
 //   Bearish
 //
 // Market structure is DISPLAY ONLY.
-// It does not block CRT confirmation.
 //
 // ============================================================
 
@@ -290,6 +284,9 @@ let monitorTimer =
   null;
 
 let scanRunning =
+  false;
+
+let initializationRunning =
   false;
 
 // ============================================================
@@ -546,8 +543,8 @@ export function getCurrentCRT(
   const endTimestamp =
     startTimestamp +
     minutes *
-      60 *
-      1000;
+    60 *
+    1000;
 
   return {
     timeframe:
@@ -632,19 +629,19 @@ export function getRemainingTime(
     Math.max(
       0,
       crt.endTimestamp -
-        Date.now()
+      Date.now()
     );
 
   const totalSeconds =
     Math.floor(
       remaining /
-        1000
+      1000
     );
 
   const hours =
     Math.floor(
       totalSeconds /
-        3600
+      3600
     );
 
   const minutes =
@@ -653,7 +650,7 @@ export function getRemainingTime(
         totalSeconds %
         3600
       ) /
-        60
+      60
     );
 
   const seconds =
@@ -793,7 +790,9 @@ function isClosedCandle(
   candle,
   timeframe = null
 ) {
-  if (!candle) {
+  if (
+    !candle
+  ) {
     return false;
   }
 
@@ -841,7 +840,7 @@ function isClosedCandle(
 
   return (
     timestamp +
-      duration <=
+    duration <=
     Date.now()
   );
 }
@@ -888,221 +887,253 @@ function getClosedCandles(
 // RACHEL T TOP
 // ============================================================
 //
-// Five closed candles:
+// CONFIRMATION MODEL:
 //
-//   c4 c3 c2 c1 c0
+// C[-4]   C[-3]   C[-2]   C[-1]   C[0]
 //
-//               c2
-//               ↑
-//           fractal top
+//                         FRACTAL
+//                           ↓
+//
+// C[-2] = fractal candle
+// C[-1] = first candle after fractal
+// C[0]  = second candle after fractal
+//
+// The fractal becomes CONFIRMED when C[0] closes.
 //
 // ============================================================
 
 function isRachelTop(
   candles,
-  index
+  confirmationIndex
 ) {
   if (
     !Array.isArray(
       candles
     ) ||
-    index < 4 ||
-    index >=
+    confirmationIndex <
+      4 ||
+    confirmationIndex >=
       candles.length
   ) {
     return false;
   }
 
-  const c4 =
+  const left2 =
     candles[
-      index - 4
+      confirmationIndex - 4
     ];
 
-  const c3 =
+  const left1 =
     candles[
-      index - 3
+      confirmationIndex - 3
     ];
 
-  const c2 =
+  const fractal =
     candles[
-      index - 2
+      confirmationIndex - 2
     ];
 
-  const c1 =
+  const right1 =
     candles[
-      index - 1
+      confirmationIndex - 1
     ];
 
-  const c0 =
+  const right2 =
     candles[
-      index
+      confirmationIndex
     ];
+
+  const left2High =
+    Number(
+      left2?.high
+    );
+
+  const left1High =
+    Number(
+      left1?.high
+    );
+
+  const fractalHigh =
+    Number(
+      fractal?.high
+    );
+
+  const right1High =
+    Number(
+      right1?.high
+    );
+
+  const right2High =
+    Number(
+      right2?.high
+    );
+
+  if (
+    !Number.isFinite(
+      left2High
+    ) ||
+    !Number.isFinite(
+      left1High
+    ) ||
+    !Number.isFinite(
+      fractalHigh
+    ) ||
+    !Number.isFinite(
+      right1High
+    ) ||
+    !Number.isFinite(
+      right2High
+    )
+  ) {
+    return false;
+  }
 
   return (
-    Number.isFinite(
-      Number(
-        c4?.high
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c3?.high
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c2?.high
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c1?.high
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c0?.high
-      )
-    ) &&
-
-    Number(
-      c4.high
-    ) <
-      Number(
-        c2.high
-      ) &&
-
-    Number(
-      c3.high
-    ) <=
-      Number(
-        c2.high
-      ) &&
-
-    Number(
-      c2.high
-    ) >=
-      Number(
-        c1.high
-      ) &&
-
-    Number(
-      c2.high
-    ) >
-      Number(
-        c0.high
-      )
+    fractalHigh >
+      left2High &&
+    fractalHigh >=
+      left1High &&
+    fractalHigh >=
+      right1High &&
+    fractalHigh >
+      right2High
   );
 }
 
 // ============================================================
 // RACHEL T BOTTOM
 // ============================================================
+//
+// C[-4]   C[-3]   C[-2]   C[-1]   C[0]
+//
+//                         FRACTAL
+//                           ↓
+//
+// C[-2] = fractal candle
+// C[-1] = first candle after fractal
+// C[0]  = second candle after fractal
+//
+// ============================================================
 
 function isRachelBottom(
   candles,
-  index
+  confirmationIndex
 ) {
   if (
     !Array.isArray(
       candles
     ) ||
-    index < 4 ||
-    index >=
+    confirmationIndex <
+      4 ||
+    confirmationIndex >=
       candles.length
   ) {
     return false;
   }
 
-  const c4 =
+  const left2 =
     candles[
-      index - 4
+      confirmationIndex - 4
     ];
 
-  const c3 =
+  const left1 =
     candles[
-      index - 3
+      confirmationIndex - 3
     ];
 
-  const c2 =
+  const fractal =
     candles[
-      index - 2
+      confirmationIndex - 2
     ];
 
-  const c1 =
+  const right1 =
     candles[
-      index - 1
+      confirmationIndex - 1
     ];
 
-  const c0 =
+  const right2 =
     candles[
-      index
+      confirmationIndex
     ];
+
+  const left2Low =
+    Number(
+      left2?.low
+    );
+
+  const left1Low =
+    Number(
+      left1?.low
+    );
+
+  const fractalLow =
+    Number(
+      fractal?.low
+    );
+
+  const right1Low =
+    Number(
+      right1?.low
+    );
+
+  const right2Low =
+    Number(
+      right2?.low
+    );
+
+  if (
+    !Number.isFinite(
+      left2Low
+    ) ||
+    !Number.isFinite(
+      left1Low
+    ) ||
+    !Number.isFinite(
+      fractalLow
+    ) ||
+    !Number.isFinite(
+      right1Low
+    ) ||
+    !Number.isFinite(
+      right2Low
+    )
+  ) {
+    return false;
+  }
 
   return (
-    Number.isFinite(
-      Number(
-        c4?.low
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c3?.low
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c2?.low
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c1?.low
-      )
-    ) &&
-    Number.isFinite(
-      Number(
-        c0?.low
-      )
-    ) &&
-
-    Number(
-      c4.low
-    ) >
-      Number(
-        c2.low
-      ) &&
-
-    Number(
-      c3.low
-    ) >=
-      Number(
-        c2.low
-      ) &&
-
-    Number(
-      c2.low
-    ) <=
-      Number(
-        c1.low
-      ) &&
-
-    Number(
-      c2.low
-    ) <
-      Number(
-        c0.low
-      )
+    fractalLow <
+      left2Low &&
+    fractalLow <=
+      left1Low &&
+    fractalLow <=
+      right1Low &&
+    fractalLow <
+      right2Low
   );
 }
 
 // ============================================================
 // BUILD FRACTAL SIGNAL
 // ============================================================
+//
+// confirmationIndex = second closed candle after fractal.
+//
+// fractalIndex = confirmationIndex - 2.
+//
+// Example:
+//
+// index 100 = fractal
+// index 101 = right candle #1
+// index 102 = right candle #2
+//
+// The CRT is confirmed at index 102.
+//
+// ============================================================
 
 function buildFractalSignal(
   candles,
-  index,
+  confirmationIndex,
   timeframe
 ) {
   if (
@@ -1113,29 +1144,73 @@ function buildFractalSignal(
     return null;
   }
 
-  const candle =
+  if (
+    confirmationIndex <
+      4 ||
+    confirmationIndex >=
+      candles.length
+  ) {
+    return null;
+  }
+
+  const confirmationCandle =
     candles[
-      index
+      confirmationIndex
+    ];
+
+  const fractalIndex =
+    confirmationIndex - 2;
+
+  const fractalCandle =
+    candles[
+      fractalIndex
     ];
 
   if (
-    !candle ||
+    !confirmationCandle ||
+    !fractalCandle
+  ) {
+    return null;
+  }
+
+  // ----------------------------------------------------------
+  // ONLY CLOSED CANDLES
+  // ----------------------------------------------------------
+
+  if (
     !isClosedCandle(
-      candle,
+      confirmationCandle,
       timeframe
     )
   ) {
     return null;
   }
 
-  const timestamp =
+  if (
+    !isClosedCandle(
+      fractalCandle,
+      timeframe
+    )
+  ) {
+    return null;
+  }
+
+  const fractalTimestamp =
     getCandleTimestamp(
-      candle
+      fractalCandle
+    );
+
+  const confirmationTimestamp =
+    getCandleTimestamp(
+      confirmationCandle
     );
 
   if (
     !Number.isFinite(
-      timestamp
+      fractalTimestamp
+    ) ||
+    !Number.isFinite(
+      confirmationTimestamp
     )
   ) {
     return null;
@@ -1143,29 +1218,33 @@ function buildFractalSignal(
 
   const close =
     Number(
-      candle.close
+      fractalCandle.close
     );
 
   const high =
     Number(
-      candle.high
+      fractalCandle.high
     );
 
   const low =
     Number(
-      candle.low
+      fractalCandle.low
     );
 
   const volume =
     Number(
-      candle.volume ??
+      fractalCandle.volume ??
       0
     );
+
+  // ----------------------------------------------------------
+  // TOP FRACTAL
+  // ----------------------------------------------------------
 
   if (
     isRachelTop(
       candles,
-      index + 2
+      confirmationIndex
     )
   ) {
     return {
@@ -1175,9 +1254,15 @@ function buildFractalSignal(
       fractalType:
         "TOP",
 
-      index,
+      index:
+        fractalIndex,
 
-      timestamp,
+      confirmationIndex,
+
+      timestamp:
+        fractalTimestamp,
+
+      confirmationTimestamp,
 
       price:
         Number.isFinite(
@@ -1204,10 +1289,14 @@ function buildFractalSignal(
     };
   }
 
+  // ----------------------------------------------------------
+  // BOTTOM FRACTAL
+  // ----------------------------------------------------------
+
   if (
     isRachelBottom(
       candles,
-      index + 2
+      confirmationIndex
     )
   ) {
     return {
@@ -1217,9 +1306,15 @@ function buildFractalSignal(
       fractalType:
         "BOTTOM",
 
-      index,
+      index:
+        fractalIndex,
 
-      timestamp,
+      confirmationIndex,
+
+      timestamp:
+        fractalTimestamp,
+
+      confirmationTimestamp,
 
       price:
         Number.isFinite(
@@ -1250,7 +1345,11 @@ function buildFractalSignal(
 }
 
 // ============================================================
-// FIND LAST FRACTAL
+// FIND LAST CONFIRMED FRACTAL
+// ============================================================
+//
+// Search from the newest CONFIRMATION candle backwards.
+//
 // ============================================================
 
 function findLastFractal(
@@ -1268,20 +1367,18 @@ function findLastFractal(
   }
 
   for (
-    let index =
+    let confirmationIndex =
       candles.length - 1;
 
-    index >= 4;
+    confirmationIndex >=
+      4;
 
-    index--
+    confirmationIndex--
   ) {
-    const fractalIndex =
-      index - 2;
-
     const signal =
       buildFractalSignal(
         candles,
-        fractalIndex,
+        confirmationIndex,
         timeframe
       );
 
@@ -1297,6 +1394,13 @@ function findLastFractal(
 
 // ============================================================
 // FIND NEWER FRACTAL
+// ============================================================
+//
+// previousTimestamp is the timestamp of the last FRACTAL
+// already sent/baselined.
+//
+// Every possible confirmation candle is checked.
+//
 // ============================================================
 
 function findNewestFractalAfter(
@@ -1318,53 +1422,46 @@ function findNewestFractalAfter(
     null;
 
   for (
-    let index = 4;
-    index <
+    let confirmationIndex =
+      4;
+
+    confirmationIndex <
       candles.length;
-    index++
+
+    confirmationIndex++
   ) {
-    const fractalIndex =
-      index - 2;
-
-    const candle =
-      candles[
-        fractalIndex
-      ];
-
-    const timestamp =
-      getCandleTimestamp(
-        candle
+    const signal =
+      buildFractalSignal(
+        candles,
+        confirmationIndex,
+        timeframe
       );
 
     if (
+      !signal
+    ) {
+      continue;
+    }
+
+    if (
       !Number.isFinite(
-        timestamp
+        signal.timestamp
       )
     ) {
       continue;
     }
 
     if (
-      timestamp <=
+      signal.timestamp <=
       previousTimestamp
     ) {
       continue;
     }
 
-    const signal =
-      buildFractalSignal(
-        candles,
-        fractalIndex,
-        timeframe
-      );
-
     if (
-      signal &&
-      (
-        !newest ||
-        signal.timestamp >
-          newest.timestamp
-      )
+      !newest ||
+      signal.timestamp >
+        newest.timestamp
     ) {
       newest =
         signal;
@@ -1378,11 +1475,6 @@ function findNewestFractalAfter(
 // LIQUIDITY SWEEP DETECTION
 // ============================================================
 //
-// IMPORTANT:
-//
-// The confirmed Rachel T fractal is the reference liquidity
-// level.
-//
 // TOP:
 //
 //   candle high > fractal high
@@ -1391,9 +1483,7 @@ function findNewestFractalAfter(
 //
 //   candle low < fractal low
 //
-// The sweep does NOT create or block CRT confirmation.
-//
-// It only adds information to the confirmed CRT.
+// INFORMATION ONLY.
 //
 // ============================================================
 
@@ -1466,11 +1556,6 @@ function findLiquiditySweep(
     ) {
       continue;
     }
-
-    // --------------------------------------------------------
-    // Do not consider candles BEFORE the confirmed fractal.
-    // The liquidity belongs to the confirmed Rachel T level.
-    // --------------------------------------------------------
 
     if (
       timestamp <
@@ -1593,8 +1678,6 @@ function findLiquiditySweep(
 //
 // RSI IS DISPLAY ONLY.
 //
-// RSI DOES NOT CREATE OR BLOCK CRT.
-//
 // ============================================================
 
 export function calculateRSI(
@@ -1625,7 +1708,7 @@ export function calculateRSI(
 
   if (
     closes.length <=
-    period
+      period
   ) {
     return null;
   }
@@ -1826,7 +1909,7 @@ export function calculateStandardDeviation(
 
   if (
     values.length <
-    period
+      period
   ) {
     return null;
   }
@@ -1915,9 +1998,7 @@ export function calculateStandardDeviation(
 // MARKET STRUCTURE
 // ============================================================
 //
-// Market structure is DISPLAY ONLY.
-//
-// It no longer blocks 5M CRT.
+// DISPLAY ONLY.
 //
 // ============================================================
 
@@ -1942,30 +2023,33 @@ function getMarketStructure(
     [];
 
   for (
-    let index = 4;
-    index <
+    let confirmationIndex =
+      4;
+
+    confirmationIndex <
       candles.length;
-    index++
+
+    confirmationIndex++
   ) {
     const fractalIndex =
-      index - 2;
+      confirmationIndex - 2;
+
+    const fractalCandle =
+      candles[
+        fractalIndex
+      ];
 
     if (
       isRachelTop(
         candles,
-        index
+        confirmationIndex
       )
     ) {
-      const candle =
-        candles[
-          fractalIndex
-        ];
-
       if (
-        candle &&
+        fractalCandle &&
         Number.isFinite(
           Number(
-            candle.high
+            fractalCandle.high
           )
         )
       ) {
@@ -1973,12 +2057,12 @@ function getMarketStructure(
           {
             timestamp:
               getCandleTimestamp(
-                candle
+                fractalCandle
               ),
 
             price:
               Number(
-                candle.high
+                fractalCandle.high
               ),
           }
         );
@@ -1988,19 +2072,14 @@ function getMarketStructure(
     if (
       isRachelBottom(
         candles,
-        index
+        confirmationIndex
       )
     ) {
-      const candle =
-        candles[
-          fractalIndex
-        ];
-
       if (
-        candle &&
+        fractalCandle &&
         Number.isFinite(
           Number(
-            candle.low
+            fractalCandle.low
           )
         )
       ) {
@@ -2008,12 +2087,12 @@ function getMarketStructure(
           {
             timestamp:
               getCandleTimestamp(
-                candle
+                fractalCandle
               ),
 
             price:
               Number(
-                candle.low
+                fractalCandle.low
               ),
           }
         );
@@ -2168,7 +2247,7 @@ async function getSymbols() {
     mexcSymbolsCache &&
     now -
       mexcSymbolsCacheTime <
-        SYMBOL_CACHE_TIME
+      SYMBOL_CACHE_TIME
   ) {
     return mexcSymbolsCache;
   }
@@ -2614,16 +2693,6 @@ function buildMarketAnalysis(
 // ============================================================
 // CREATE DISCORD EMBED
 // ============================================================
-//
-// IMPORTANT:
-//
-// CRT remains based on Rachel T.
-//
-// TopDown / HTF / ALIGNMENT fields are removed.
-//
-// Liquidity information is additional information only.
-//
-// ============================================================
 
 function createSignalEmbed(
   data
@@ -2794,6 +2863,13 @@ function createSignalEmbed(
     );
   }
 
+  // ----------------------------------------------------------
+  // CONFIRMED
+  //
+  // This is the actual candle on which the Rachel T fractal
+  // became confirmed.
+  // ----------------------------------------------------------
+
   fields.push(
     {
       name:
@@ -2801,6 +2877,7 @@ function createSignalEmbed(
 
       value:
         formatDateTime(
+          signal.confirmationTimestamp ??
           signal.timestamp
         ),
 
@@ -2838,6 +2915,7 @@ function createSignalEmbed(
 
     .setTimestamp(
       new Date(
+        signal.confirmationTimestamp ??
         signal.timestamp
       )
     );
@@ -2898,7 +2976,7 @@ async function sendCRTSignal(
     );
 
     console.log(
-      `[CRT] CRT CONFIRMATION SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.type} | ${data.signal.fractalType} | LIQUIDITY: ${data.liquidity?.swept ? "SWEPT" : "NOT SWEPT"}`
+      `[CRT] CRT CONFIRMATION SENT | ${data.symbol} | ${data.timeframe} | ${data.signal.type} | ${data.signal.fractalType} | FRACTAL: ${formatDateTime(data.signal.timestamp)} | CONFIRMED: ${formatDateTime(data.signal.confirmationTimestamp)} | LIQUIDITY: ${data.liquidity?.swept ? "SWEPT" : "NOT SWEPT"}`
     );
 
     if (
@@ -3045,8 +3123,14 @@ async function processMarket(
       signal.index
     ];
 
+  const confirmationCandle =
+    candles[
+      signal.confirmationIndex
+    ];
+
   if (
-    !fractalCandle
+    !fractalCandle ||
+    !confirmationCandle
   ) {
     return;
   }
@@ -3077,6 +3161,11 @@ async function processMarket(
       normalizedTimeframe
     );
 
+  signal.confirmationTimestamp =
+    getCandleTimestamp(
+      confirmationCandle
+    );
+
   // ==========================================================
   // STARTUP BASELINE
   // ==========================================================
@@ -3100,7 +3189,7 @@ async function processMarket(
     );
 
     console.log(
-      `[CRT] BASELINE | ${normalizedSymbol} | ${normalizedTimeframe} | ${signal.type} | ${signal.fractalType}`
+      `[CRT] BASELINE | ${normalizedSymbol} | ${normalizedTimeframe} | ${signal.type} | ${signal.fractalType} | FRACTAL: ${formatDateTime(signal.timestamp)} | CONFIRMED: ${formatDateTime(signal.confirmationTimestamp)}`
     );
 
     return;
@@ -3124,12 +3213,6 @@ async function processMarket(
 
   // ==========================================================
   // LIQUIDITY SWEEP
-  // ==========================================================
-  //
-  // This is checked AFTER Rachel T confirms the CRT.
-  //
-  // It does NOT affect CRT confirmation.
-  //
   // ==========================================================
 
   const liquidity =
@@ -3273,7 +3356,7 @@ function getBoundaryKey(
   const boundaryMinute =
     Math.floor(
       totalMinutes /
-        minutes
+      minutes
     ) *
     minutes;
 
@@ -3288,7 +3371,7 @@ function getBoundaryKey(
     pad(
       Math.floor(
         boundaryMinute /
-          60
+        60
       )
     ),
     pad(
@@ -3358,22 +3441,24 @@ function isTimeframeDue(
 // ============================================================
 
 function markTimeframeProcessed(
-  timeframe
+  timeframe,
+  closeTimestamp = null
 ) {
-  const crt =
-    getCurrentCRT(
-      timeframe
-    );
-
-  const boundaryDate =
-    new Date(
-      crt.startTimestamp
-    );
+  const timestamp =
+    Number.isFinite(
+      closeTimestamp
+    )
+      ? closeTimestamp
+      : getNextCandleCloseTimestamp(
+          timeframe
+        );
 
   const boundaryKey =
     getBoundaryKey(
       timeframe,
-      boundaryDate
+      new Date(
+        timestamp
+      )
     );
 
   processedBoundaryState.set(
@@ -3466,6 +3551,12 @@ async function runSynchronizedScan(
   client
 ) {
   if (
+    initializationRunning
+  ) {
+    return;
+  }
+
+  if (
     scanRunning
   ) {
     console.warn(
@@ -3521,11 +3612,12 @@ async function runSynchronizedScan(
     );
 
     // ========================================================
-    // Higher timeframes are processed first.
+    // HIGHER TIMEFRAMES FIRST
     //
-    // This is kept for scanner priority only.
+    // Priority only.
     //
-    // There is NO TopDown dependency anymore.
+    // NO HTF dependency.
+    // NO alignment blocking.
     // ========================================================
 
     for (
@@ -3539,6 +3631,11 @@ async function runSynchronizedScan(
         break;
       }
 
+      const closeTimestamp =
+        getNextCandleCloseTimestamp(
+          timeframe
+        );
+
       await scanTimeframe(
         client,
         timeframe,
@@ -3546,7 +3643,8 @@ async function runSynchronizedScan(
       );
 
       markTimeframeProcessed(
-        timeframe
+        timeframe,
+        closeTimestamp
       );
     }
   } catch (
@@ -3574,170 +3672,167 @@ async function runSynchronizedScan(
 // STARTUP BASELINE SCAN
 // ============================================================
 //
-// Startup must NOT send historical signals.
+// Startup MUST NOT send historical signals.
 //
-// It only creates the baseline.
+// It creates the baseline only.
 //
 // ============================================================
 
 async function initializeStartupBaseline(
   client
 ) {
-  const symbols =
-    await getSymbols();
+  initializationRunning =
+    true;
 
-  if (
-    !symbols.length
-  ) {
-    console.warn(
-      "[CRT] Startup baseline skipped: no MEXC symbols."
-    );
+  try {
+    const symbols =
+      await getSymbols();
 
-    return;
-  }
-
-  console.log(
-    "[CRT] Building historical startup baseline..."
-  );
-
-  for (
-    const timeframe of
-    SCAN_PRIORITY
-  ) {
     if (
-      Date.now() <
-      mexcBlockedUntil
+      !symbols.length
     ) {
-      break;
+      console.warn(
+        "[CRT] Startup baseline skipped: no MEXC symbols."
+      );
+
+      return;
     }
 
     console.log(
-      `[CRT] Baseline timeframe: ${timeframe.toUpperCase()}`
+      "[CRT] Building historical startup baseline..."
     );
 
-    const jobs =
-      symbols.map(
-        symbol => ({
-          symbol,
-          timeframe,
-        })
-      );
-
-    await runWithConcurrency(
-      jobs,
-      CONCURRENCY,
-      async job => {
-        const candles =
-          await fetchCandles(
-            job.symbol,
-            job.timeframe
-          );
-
-        if (
-          candles.length <
-          20
-        ) {
-          return;
-        }
-
-        const closed =
-          getClosedCandles(
-            candles,
-            job.timeframe
-          );
-
-        if (
-          closed.length <
-          20
-        ) {
-          return;
-        }
-
-        const analysis =
-          buildMarketAnalysis(
-            closed,
-            job.timeframe
-          );
-
-        setMarketStructureState(
-          normalizeSymbol(
-            job.symbol
-          ),
-          job.timeframe,
-          analysis.marketStructure
-        );
-
-        const signal =
-          findLastFractal(
-            closed,
-            job.timeframe
-          );
-
-        if (
-          !signal
-        ) {
-          return;
-        }
-
-        const normalizedSymbol =
-          normalizeSymbol(
-            job.symbol
-          );
-
-        const stateKey =
-          `MEXC|${normalizedSymbol}|${job.timeframe}`;
-
-        signalState.set(
-          stateKey,
-          signal.timestamp
-        );
-
-        startupBaseline.add(
-          stateKey
-        );
-
-        signal.symbol =
-          normalizedSymbol;
-
-        signal.timeframe =
-          job.timeframe;
+    for (
+      const timeframe of
+      SCAN_PRIORITY
+    ) {
+      if (
+        Date.now() <
+        mexcBlockedUntil
+      ) {
+        break;
       }
-    );
-  }
 
-  // ==========================================================
-  // Mark current boundaries as processed.
-  //
-  // Prevents startup from immediately re-scanning the same
-  // candle boundary.
-  // ==========================================================
-
-  for (
-    const timeframe of
-    SCAN_PRIORITY
-  ) {
-    const crt =
-      getCurrentCRT(
-        timeframe
+      console.log(
+        `[CRT] Baseline timeframe: ${timeframe.toUpperCase()}`
       );
 
-    const boundaryKey =
-      getBoundaryKey(
+      const jobs =
+        symbols.map(
+          symbol => ({
+            symbol,
+            timeframe,
+          })
+        );
+
+      await runWithConcurrency(
+        jobs,
+        CONCURRENCY,
+        async job => {
+          const candles =
+            await fetchCandles(
+              job.symbol,
+              job.timeframe
+            );
+
+          if (
+            candles.length <
+            20
+          ) {
+            return;
+          }
+
+          const closed =
+            getClosedCandles(
+              candles,
+              job.timeframe
+            );
+
+          if (
+            closed.length <
+            20
+          ) {
+            return;
+          }
+
+          const analysis =
+            buildMarketAnalysis(
+              closed,
+              job.timeframe
+            );
+
+          const normalizedSymbol =
+            normalizeSymbol(
+              job.symbol
+            );
+
+          setMarketStructureState(
+            normalizedSymbol,
+            job.timeframe,
+            analysis.marketStructure
+          );
+
+          const signal =
+            findLastFractal(
+              closed,
+              job.timeframe
+            );
+
+          if (
+            !signal
+          ) {
+            return;
+          }
+
+          const stateKey =
+            `MEXC|${normalizedSymbol}|${job.timeframe}`;
+
+          signalState.set(
+            stateKey,
+            signal.timestamp
+          );
+
+          startupBaseline.add(
+            stateKey
+          );
+        }
+      );
+    }
+
+    // ========================================================
+    // MARK CURRENT BOUNDARIES PROCESSED
+    //
+    // Prevents startup from immediately re-scanning the
+    // current already-known boundary.
+    // ========================================================
+
+    for (
+      const timeframe of
+      SCAN_PRIORITY
+    ) {
+      const crt =
+        getCurrentCRT(
+          timeframe
+        );
+
+      processedBoundaryState.set(
         timeframe,
-        new Date(
-          crt.startTimestamp
+        getBoundaryKey(
+          timeframe,
+          new Date(
+            crt.startTimestamp
+          )
         )
       );
+    }
 
-    processedBoundaryState.set(
-      timeframe,
-      boundaryKey
+    console.log(
+      "[CRT] Historical startup baseline complete."
     );
+  } finally {
+    initializationRunning =
+      false;
   }
-
-  console.log(
-    "[CRT] Historical startup baseline complete."
-  );
 }
 
 // ============================================================
@@ -3881,6 +3976,10 @@ export function startCRTMonitor(
   );
 
   console.log(
+    "[CRT] Rachel T confirmation: FRACTAL + TWO CLOSED RIGHT CANDLES"
+  );
+
+  console.log(
     "============================================================"
   );
 
@@ -3911,12 +4010,10 @@ export function startCRTMonitor(
   // HIGH-FREQUENCY SCHEDULER
   // ==========================================================
   //
-  // This is NOT a market scan every second.
+  // This does NOT scan the market every second.
   //
   // It only checks whether a timeframe has reached its
   // candle boundary.
-  //
-  // Actual MEXC requests happen only when a timeframe is due.
   //
   // ==========================================================
 
@@ -3967,6 +4064,9 @@ export function stopCRTMonitor() {
   scanRunning =
     false;
 
+  initializationRunning =
+    false;
+
   console.log(
     "[CRT] Monitor stopped."
   );
@@ -3997,6 +4097,8 @@ export function getCRTMonitorStatus() {
       crtMonitorStarted,
 
     scanRunning,
+
+    initializationRunning,
 
     schedulerInterval:
       CHECK_INTERVAL,
@@ -4030,6 +4132,9 @@ export function getCRTMonitorStatus() {
 
     rachelTFractal:
       true,
+
+    rachelTConfirmation:
+      "TWO_CLOSED_RIGHT_CANDLES",
 
     liquiditySweep:
       true,
@@ -4103,7 +4208,7 @@ export function getNextCRTClose(
     Math.max(
       0,
       closeTimestamp -
-        Date.now()
+      Date.now()
     );
 
   return {
@@ -4142,23 +4247,23 @@ function formatDuration(
       0,
       Math.floor(
         milliseconds /
-          1000
+        1000
       )
     );
 
   const hours =
     Math.floor(
       totalSeconds /
-        3600
+      3600
     );
 
   const minutes =
     Math.floor(
       (
         totalSeconds %
-          3600
+        3600
       ) /
-        60
+      60
     );
 
   const seconds =
@@ -4223,6 +4328,9 @@ export function getCRTServiceInfo() {
 
     rachelTFractal:
       true,
+
+    rachelTConfirmation:
+      "TWO_CLOSED_RIGHT_CANDLES",
 
     liquiditySweep:
       true,
@@ -4331,6 +4439,10 @@ console.log(
 );
 
 console.log(
+  "[CRT] Rachel T confirmation requires two closed candles."
+);
+
+console.log(
   "[CRT] Timeframes: 1D -> 4H -> 1H -> 15M -> 5M."
 );
 
@@ -4401,3 +4513,4 @@ console.log(
 console.log(
   "[CRT] PDYN CRT service ready."
 );
+
