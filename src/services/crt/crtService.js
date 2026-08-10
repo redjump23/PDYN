@@ -1,4 +1,3 @@
-```js
 import { EmbedBuilder } from "discord.js";
 import botConfig from "../../config/bot.js";
 
