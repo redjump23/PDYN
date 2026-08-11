@@ -678,7 +678,7 @@ function createSignalEmbed(
     // ========================================================
 
     .setDescription(
-      '**PDYN CRT CONFIRMATION**'
+      '**PDYN CRT Signal**'
     )
 
     // ========================================================
