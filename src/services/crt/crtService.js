@@ -1859,7 +1859,7 @@ function createSignalEmbed(
         `${emoji} ${coin}`
       )
       .setDescription(
-        '**PDYN CRT CONFIRMATION**'
+        '**PDYN CRT Signal**'
       )
       .addFields(
         {
