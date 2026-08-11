@@ -1120,6 +1120,20 @@ async function refreshSymbols(
 //
 // ============================================================
 
+// ============================================================
+// SEND LIVE LIQUIDITY ALERT
+// ============================================================
+//
+// DISPLAY:
+//
+//   PDYN Liquidity Signal
+//   Coin
+//   Timeframe
+//   Market Structure
+//   Liquidity Swept
+//
+// ============================================================
+
 async function sendLiveLiquidityAlert(
   client,
   signal
@@ -1155,13 +1169,26 @@ async function sendLiveLiquidityAlert(
         ''
     ).toUpperCase();
 
+  // ==========================================================
+  // COIN
+  // ==========================================================
+
+  const coin =
+    formatCoin(
+      signal.symbol
+    );
+
+  // ==========================================================
+  // MARKET STRUCTURE
+  // ==========================================================
+
   const structure =
     getMarketStructure(
       signal
     );
 
   // ==========================================================
-  // DETERMINE WHICH RACHEL T FRACTAL WAS SWEPT
+  // DETERMINE WHICH FRACTAL WAS SWEPT
   // ==========================================================
 
   let sweptFractal =
@@ -1189,6 +1216,14 @@ async function sendLiveLiquidityAlert(
         'PDYN Liquidity Signal'
       )
       .addFields(
+        {
+          name:
+            'Coin',
+          value:
+            `**${coin}**`,
+          inline:
+            true,
+        },
         {
           name:
             'Timeframe',
@@ -1239,7 +1274,7 @@ async function sendLiveLiquidityAlert(
 
   await channel.send({
     content:
-      `🚨 **PDYN Liquidity Signal**`,
+      `🚨 **PDYN Liquidity Signal — ${coin}**`,
     embeds: [
       embed,
     ],
