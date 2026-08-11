@@ -38,8 +38,11 @@
 //   • duplicate prevention
 //
 // ============================================================
+
 import { EmbedBuilder } from 'discord.js';
+
 import botConfig from '../../config/bot.js';
+
 import {
   buildSignal,
   buildLiveState,
@@ -53,7 +56,6 @@ import {
 } from './mexcService.js';
 
 import { isNewSignal } from './signalManager.js';
-
 
 // ============================================================
 // CRT CONFIG
@@ -83,14 +85,12 @@ const TIMEFRAMES =
     '1d': 1440,
   };
 
-
 // ============================================================
 // DISCORD CHANNELS
 // ============================================================
 
 const CHANNELS =
   CRT_CONFIG.channels || {};
-
 
 // ============================================================
 // MARKETS
@@ -108,7 +108,6 @@ const MARKET_TYPES =
         .toLowerCase()
     )
     .filter(Boolean);
-
 
 // ============================================================
 // CLOSED-CANDLE SCAN INTERVAL
@@ -140,7 +139,6 @@ const SCAN_INTERVAL =
     )
   );
 
-
 // ============================================================
 // LIVE LIQUIDITY INTERVAL
 // ============================================================
@@ -161,7 +159,6 @@ const LIVE_LIQUIDITY_INTERVAL =
     )
   );
 
-
 // ============================================================
 // KLINE LIMIT
 // ============================================================
@@ -175,7 +172,6 @@ const KLINE_LIMIT =
     )
   );
 
-
 // ============================================================
 // MAX SYMBOLS
 // ============================================================
@@ -188,7 +184,6 @@ const MAX_SYMBOLS =
         30
     )
   );
-
 
 // ============================================================
 // RSI
@@ -212,14 +207,12 @@ const OVERBOUGHT =
       70
   );
 
-
 // ============================================================
 // SYMBOL MODE
 // ============================================================
 
 const AUTO_SYMBOLS =
   CRT_CONFIG.autoSymbols !== false;
-
 
 // ============================================================
 // SERVICE STATE
@@ -234,7 +227,6 @@ let scanRunning =
 let liveScanRunning =
   false;
 
-
 // ============================================================
 // SYMBOL CACHE
 // ============================================================
@@ -244,7 +236,6 @@ const cachedSymbols =
 
 let lastSymbolRefresh =
   0;
-
 
 // ============================================================
 // LIVE SWEEP STATE
@@ -257,7 +248,6 @@ let lastSymbolRefresh =
 
 const liveSweepSeen =
   new Map();
-
 
 // ============================================================
 // CLOSED CANDLE STATE
@@ -274,7 +264,6 @@ const liveSweepSeen =
 
 const lastProcessedCandle =
   new Map();
-
 
 // ============================================================
 // TIMEFRAME LABEL
@@ -294,7 +283,6 @@ function timeframeLabel(
     String(timeframe)
   );
 }
-
 
 // ============================================================
 // TIMEFRAME DURATION
@@ -325,7 +313,6 @@ function getTimeframeMs(
     1000
   );
 }
-
 
 // ============================================================
 // EXACT CANDLE CLOSE TIME
@@ -372,7 +359,6 @@ function getExpectedCandleCloseTime(
     duration
   );
 }
-
 
 // ============================================================
 // IS EXACT MEXC CANDLE CLOSED?
@@ -426,7 +412,6 @@ function isCandleActuallyClosed(
   );
 }
 
-
 // ============================================================
 // GET CANDLE OPEN TIME
 // ============================================================
@@ -454,9 +439,20 @@ function getCandleOpenTime(
   return value;
 }
 
-
 // ============================================================
 // GET CANDLE CLOSE TIME
+// ============================================================
+//
+// IMPORTANT:
+//
+// The exact MEXC timeframe calculation remains the authority.
+//
+// If an explicit closeTime is supplied by the service it may
+// be used for display, but closed-candle validation always
+// uses:
+//
+//   openTime + timeframe duration
+//
 // ============================================================
 
 function getCandleCloseTime(
@@ -489,7 +485,6 @@ function getCandleCloseTime(
     timeframe
   );
 }
-
 
 // ============================================================
 // PRICE FORMATTER
@@ -546,7 +541,6 @@ function fmtPrice(
   );
 }
 
-
 // ============================================================
 // NUMBER FORMATTER
 // ============================================================
@@ -570,7 +564,6 @@ function fmtNumber(
     decimals
   );
 }
-
 
 // ============================================================
 // RSI DISPLAY
@@ -607,7 +600,6 @@ function formatRSIState(
 
   return 'Neutral';
 }
-
 
 // ============================================================
 // MARKET STRUCTURE
@@ -651,7 +643,6 @@ function getMarketStructure(
   return 'N/A';
 }
 
-
 // ============================================================
 // STD DEVIATION
 // ============================================================
@@ -669,7 +660,6 @@ function getStdDeviation(
     2
   );
 }
-
 
 // ============================================================
 // SIGNAL CONFIRMATION
@@ -702,9 +692,14 @@ function isConfirmedSignal(
   return true;
 }
 
-
 // ============================================================
 // STRUCTURE EMOJI
+// ============================================================
+//
+// Used ONLY for CRT confirmation.
+//
+// Live liquidity uses 🚨 instead.
+//
 // ============================================================
 
 function structureEmoji(
@@ -732,9 +727,14 @@ function structureEmoji(
   return '🟡';
 }
 
-
 // ============================================================
 // EMBED COLOR
+// ============================================================
+//
+// Used for CRT confirmation.
+//
+// Live liquidity has its own dedicated yellow color.
+//
 // ============================================================
 
 function signalColor(
@@ -762,6 +762,21 @@ function signalColor(
   return 0xfee75c;
 }
 
+// ============================================================
+// LIVE LIQUIDITY COLOR
+// ============================================================
+//
+// IMPORTANT:
+//
+// Live liquidity is ALWAYS yellow.
+//
+// It does NOT change color based on market structure.
+//
+// ============================================================
+
+function liveLiquidityColor() {
+  return 0xfee75c;
+}
 
 // ============================================================
 // COIN SYMBOL FORMATTER
@@ -775,7 +790,7 @@ function formatCoin(
       'UNKNOWN'
   )
     .replace(
-      /[-_]USDT$/i,
+      /[-*]USDT$/i,
       ''
     )
     .replace(
@@ -783,7 +798,7 @@ function formatCoin(
       ''
     )
     .replace(
-      /[-_]USD$/i,
+      /[-*]USD$/i,
       ''
     )
     .replace(
@@ -797,57 +812,26 @@ function formatCoin(
     .toUpperCase();
 }
 
-
 // ============================================================
 // GET LIVE LIQUIDITY LABEL
 // ============================================================
 //
-// This is ONLY used for the separate PDYN Liquidity Signal.
+// IMPORTANT:
 //
-// It is NOT displayed in CRT Confirmation.
+// The live liquidity signal intentionally does NOT expose:
+//
+//   • PREVIOUS RACHEL_T TOP SWEPT
+//   • PREVIOUS RACHEL_T BOTTOM SWEPT
+//
+// Both are replaced by:
+//
+//   LIQUIDITY SWEPT
 //
 // ============================================================
 
-function getLiveLiquidityLabel(
-  liveSweep
-) {
-  if (
-    !liveSweep
-  ) {
-    return 'LIQUIDITY SWEPT';
-  }
-
-  if (
-    typeof liveSweep.label ===
-    'string' &&
-    liveSweep.label.trim()
-  ) {
-    return liveSweep.label;
-  }
-
-  const type =
-    String(
-      liveSweep.type ||
-        ''
-    ).toUpperCase();
-
-  if (
-    type ===
-    'HIGH'
-  ) {
-    return '**PREVIOUS RACHEL_T TOP SWEPT**';
-  }
-
-  if (
-    type ===
-    'LOW'
-  ) {
-    return '**PREVIOUS RACHEL_T BOTTOM SWEPT**';
-  }
-
+function getLiveLiquidityLabel() {
   return '**LIQUIDITY SWEPT**';
 }
-
 
 // ============================================================
 // CREATE CRT CONFIRMATION EMBED
@@ -962,9 +946,9 @@ function createSignalEmbed(
           'PDYN • Rachel T CRT • MEXC Exchange',
       });
 
-  // ==========================================================
+  // ========================================================
   // CLOSED MEXC CANDLE TIMESTAMP
-  // ==========================================================
+  // ========================================================
 
   if (
     signal.candleTime
@@ -987,7 +971,6 @@ function createSignalEmbed(
 
   return embed;
 }
-
 
 // ============================================================
 // SEND CONFIRMED CRT SIGNAL
@@ -1057,6 +1040,7 @@ async function sendSignal(
     await channel.send({
       content:
         `${emoji} **${coin}**`,
+
       embeds: [
         createSignalEmbed(
           signal
@@ -1078,7 +1062,6 @@ async function sendSignal(
   }
 }
 
-
 // ============================================================
 // CREATE LIVE LIQUIDITY EMBED
 // ============================================================
@@ -1092,7 +1075,12 @@ async function sendSignal(
 //   Market Structure
 //   Fractal Swept
 //
-// This is intentionally separate from CRT confirmation.
+// IMPORTANT:
+//
+//   • Always yellow
+//   • Uses 🚨 siren emoji
+//   • Does NOT display TOP/BOTTOM
+//   • Displays only LIQUIDITY SWEPT
 //
 // ============================================================
 
@@ -1104,28 +1092,18 @@ function createLiveLiquidityEmbed(
       signal
     );
 
-  const emoji =
-    structureEmoji(
-      signal
-    );
-
   const coin =
     formatCoin(
       signal.symbol
     );
 
-  const sweep =
-    signal.liveLiquiditySweep;
-
   const swept =
-    getLiveLiquidityLabel(
-      sweep
-    );
+    getLiveLiquidityLabel();
 
   const embed =
     new EmbedBuilder()
       .setTitle(
-        `${emoji} ${coin}`
+        `🚨 ${coin}`
       )
       .setDescription(
         '**PDYN Liquidity Signal**'
@@ -1167,14 +1145,16 @@ function createLiveLiquidityEmbed(
         }
       )
       .setColor(
-        signalColor(
-          signal
-        )
+        liveLiquidityColor()
       )
       .setFooter({
         text:
           'PDYN • Rachel T Liquidity • MEXC Exchange',
       });
+
+  // ========================================================
+  // CURRENT RUNNING MEXC CANDLE TIMESTAMP
+  // ========================================================
 
   if (
     signal.liveCandleTime
@@ -1197,7 +1177,6 @@ function createLiveLiquidityEmbed(
 
   return embed;
 }
-
 
 // ============================================================
 // SEND LIVE LIQUIDITY ALERT
@@ -1253,11 +1232,6 @@ async function sendLiveLiquidityAlert(
     return false;
   }
 
-  const emoji =
-    structureEmoji(
-      signal
-    );
-
   const coin =
     formatCoin(
       signal.symbol
@@ -1265,8 +1239,13 @@ async function sendLiveLiquidityAlert(
 
   try {
     await channel.send({
+      // ======================================================
+      // LIVE LIQUIDITY ALWAYS USES SIREN
+      // ======================================================
+
       content:
-        `${emoji} **${coin}**`,
+        `🚨 **${coin}**`,
+
       embeds: [
         createLiveLiquidityEmbed(
           signal
@@ -1288,7 +1267,6 @@ async function sendLiveLiquidityAlert(
   }
 }
 
-
 // ============================================================
 // FILTER SYMBOLS
 // ============================================================
@@ -1308,11 +1286,10 @@ function filterSymbols(
     ) &&
     configured.length
   ) {
-    return configured
-      .slice(
-        0,
-        MAX_SYMBOLS
-      );
+    return configured.slice(
+      0,
+      MAX_SYMBOLS
+    );
   }
 
   if (
@@ -1349,9 +1326,9 @@ function filterSymbols(
             symbol
           ).toUpperCase();
 
-        // ======================================================
+        // ====================================================
         // FUTURES
-        // ======================================================
+        // ====================================================
 
         if (
           market ===
@@ -1375,9 +1352,9 @@ function filterSymbols(
           );
         }
 
-        // ======================================================
+        // ====================================================
         // SPOT
-        // ======================================================
+        // ====================================================
 
         return (
           normalized.endsWith(
@@ -1405,7 +1382,6 @@ function filterSymbols(
     .filter(Boolean);
 }
 
-
 // ============================================================
 // REFRESH SYMBOLS
 // ============================================================
@@ -1416,9 +1392,7 @@ async function refreshSymbols(
   const ttl =
     Number(
       CRT_CONFIG.symbolRefreshMs ||
-        15 *
-          60 *
-          1000
+        15 * 60 * 1000
     );
 
   if (
@@ -1479,7 +1453,6 @@ async function refreshSymbols(
   lastSymbolRefresh =
     Date.now();
 }
-
 
 // ============================================================
 // SCAN LIVE LIQUIDITY — ONE SYMBOL
@@ -1690,10 +1663,10 @@ async function scanLiveLiquiditySymbol(
       sent
     ) {
       console.log(
-        `[CRT] LIVE LIQUIDITY SWEPT ${market}:${symbol}:${timeframe}` +
-        ` | Structure=${getMarketStructure(liveState)}` +
-        ` | Type=${liveSweep.type}` +
-        ` | Fractal=${liveSweep.fractal.fractalType}`
+        `[CRT] 🚨 LIVE LIQUIDITY SWEPT ${market}:${symbol}:${timeframe}` +
+          ` | Structure=${getMarketStructure(liveState)}` +
+          ` | Type=${liveSweep.type}` +
+          ` | Fractal=${liveSweep.fractal.fractalType}`
       );
     }
   } catch (
@@ -1706,7 +1679,6 @@ async function scanLiveLiquiditySymbol(
     );
   }
 }
-
 
 // ============================================================
 // LIVE LIQUIDITY SCAN
@@ -1771,7 +1743,6 @@ async function scanLiveLiquidity(
       false;
   }
 }
-
 
 // ============================================================
 // GET CLOSED CANDLES
@@ -1852,7 +1823,6 @@ function getClosedCandles(
       // CRITICAL:
       //
       // Current running candle is rejected here.
-      //
       // ======================================================
 
       return (
@@ -1862,7 +1832,6 @@ function getClosedCandles(
     }
   );
 }
-
 
 // ============================================================
 // SORT CANDLES CHRONOLOGICALLY
@@ -1883,7 +1852,6 @@ function sortCandlesAscending(
       )
   );
 }
-
 
 // ============================================================
 // CLOSED-CANDLE SCAN — ONE SYMBOL
@@ -2184,11 +2152,22 @@ async function scanSymbol(
 
       console.log(
         `[CRT] RACHEL T CONFIRMED ${market}:${symbol}:${timeframe}` +
-        ` | Candle Open=${new Date(candleOpenTime).toISOString()}` +
-        ` | Candle Close=${new Date(candleCloseTime).toISOString()}` +
-        ` | Structure=${getMarketStructure(signal)}` +
-        ` | STD=${getStdDeviation(signal)}` +
-        ` | RSI=${signal.rsiState || 'Neutral'}`
+          ` | Candle Open=${new Date(
+            candleOpenTime
+          ).toISOString()}` +
+          ` | Candle Close=${new Date(
+            candleCloseTime
+          ).toISOString()}` +
+          ` | Structure=${getMarketStructure(
+            signal
+          )}` +
+          ` | STD=${getStdDeviation(
+            signal
+          )}` +
+          ` | RSI=${
+            signal.rsiState ||
+            'Neutral'
+          }`
       );
     }
   } catch (
@@ -2201,7 +2180,6 @@ async function scanSymbol(
     );
   }
 }
-
 
 // ============================================================
 // CLEAN OLD PROCESSED CANDLES
@@ -2279,7 +2257,6 @@ function cleanupProcessedCandles() {
   }
 }
 
-
 // ============================================================
 // CLEAN LIVE SWEEP STATE
 // ============================================================
@@ -2305,7 +2282,7 @@ function cleanupLiveSweepState() {
         Number(
           timestamp
         ) >
-      maxAge
+        maxAge
     ) {
       liveSweepSeen.delete(
         key
@@ -2324,8 +2301,12 @@ function cleanupLiveSweepState() {
 
     entries.sort(
       (a, b) =>
-        Number(a[1]) -
-        Number(b[1])
+        Number(
+          a[1]
+        ) -
+        Number(
+          b[1]
+        )
     );
 
     const removeCount =
@@ -2343,7 +2324,6 @@ function cleanupLiveSweepState() {
     }
   }
 }
-
 
 // ============================================================
 // SCAN ALL CLOSED CANDLES
@@ -2426,7 +2406,6 @@ async function scanAll(
   }
 }
 
-
 // ============================================================
 // START CRT MONITOR
 // ============================================================
@@ -2466,9 +2445,9 @@ export function startCRTMonitor(
 
   if (
     CRT_CONFIG.enabled ===
-    false ||
+      false ||
     CRT_CONFIG.autoAlerts ===
-    false
+      false
   ) {
     console.log(
       '[CRT] Signal monitor disabled by configuration.'
@@ -2501,11 +2480,15 @@ export function startCRTMonitor(
   );
 
   console.log(
-    `[CRT] Markets: ${MARKET_TYPES.join(', ')}`
+    `[CRT] Markets: ${MARKET_TYPES.join(
+      ', '
+    )}`
   );
 
   console.log(
-    `[CRT] Timeframes: ${Object.keys(TIMEFRAMES).join(', ')}`
+    `[CRT] Timeframes: ${Object.keys(
+      TIMEFRAMES
+    ).join(', ')}`
   );
 
   console.log(
@@ -2528,6 +2511,14 @@ export function startCRTMonitor(
     `[CRT] Auto symbols: ${AUTO_SYMBOLS}`
   );
 
+  console.log(
+    '[CRT] LIVE LIQUIDITY DISPLAY: 🚨 YELLOW'
+  );
+
+  console.log(
+    '[CRT] LIVE LIQUIDITY LABEL: LIQUIDITY SWEPT'
+  );
+
   // ==========================================================
   // PRINT EXACT TIMEFRAME DURATIONS
   // ==========================================================
@@ -2544,7 +2535,9 @@ export function startCRTMonitor(
       );
 
     console.log(
-      `[CRT] ${timeframe} candle duration: ${duration / 60000} minutes`
+      `[CRT] ${timeframe} candle duration: ${
+        duration / 60000
+      } minutes`
     );
   }
 
@@ -2612,7 +2605,6 @@ export function startCRTMonitor(
   );
 }
 
-
 // ============================================================
 // MANUAL CRT SCAN
 // ============================================================
@@ -2633,7 +2625,6 @@ export async function scanCRTNow(
   );
 }
 
-
 // ============================================================
 // MANUAL LIVE LIQUIDITY SCAN
 // ============================================================
@@ -2653,7 +2644,6 @@ export async function scanLiquidityNow(
     client
   );
 }
-
 
 // ============================================================
 // CRT CONFIG
@@ -2721,6 +2711,20 @@ export function getCRTConfig() {
     liveSignal:
       'RACHEL_T_LIQUIDITY_SWEEP',
 
+    liveSignalDisplay: {
+      emoji:
+        '🚨',
+
+      color:
+        'YELLOW',
+
+      hex:
+        0xfee75c,
+
+      label:
+        'LIQUIDITY SWEPT',
+    },
+
     candleTimingAuthority:
       'MEXC',
 
@@ -2728,7 +2732,6 @@ export function getCRTConfig() {
       true,
   };
 }
-
 
 // ============================================================
 // SERVICE LOADED
@@ -2742,4 +2745,8 @@ console.log(
 
 console.log(
   '[CRT] Exact MEXC candle-close timing enabled.'
+);
+
+console.log(
+  '[CRT] Live Liquidity: 🚨 YELLOW • LIQUIDITY SWEPT'
 );
