@@ -796,9 +796,6 @@ function createSignalEmbed(signal) {
   const stdDeviation =
     getStdDeviation(signal);
 
-  const liquidity =
-    getLiquiditySweep(signal);
-
   const embed =
     new EmbedBuilder()
       .setTitle(
@@ -828,11 +825,6 @@ function createSignalEmbed(signal) {
         {
           name: 'STD Deviation',
           value: stdDeviation,
-          inline: true,
-        },
-        {
-          name: 'Liquidity',
-          value: liquidity,
           inline: true,
         },
         {
