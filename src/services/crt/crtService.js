@@ -1099,6 +1099,7 @@ async function refreshSymbols(
     Date.now();
 }
 
+
 // ============================================================
 // SEND LIVE LIQUIDITY ALERT
 // ============================================================
@@ -1109,6 +1110,13 @@ async function refreshSymbols(
 //
 //   The currently-running MEXC candle has swept a previous
 //   Rachel T fractal liquidity level.
+//
+// DISPLAY:
+//
+//   PDYN Liquidity Signal
+//   Timeframe
+//   Market Structure
+//   Liquidity Swept
 //
 // ============================================================
 
@@ -1141,73 +1149,46 @@ async function sendLiveLiquidityAlert(
   const sweep =
     signal.liveLiquiditySweep;
 
-  const fractal =
-    sweep?.fractal;
-
-  const coin =
-    formatCoin(
-      signal.symbol
-    );
-
   const type =
     String(
       sweep?.type ||
         ''
     ).toUpperCase();
 
-  const currentPrice =
-    sweep?.currentPrice;
+  const structure =
+    getMarketStructure(
+      signal
+    );
 
-  const level =
-    sweep?.level;
+  // ==========================================================
+  // DETERMINE WHICH RACHEL T FRACTAL WAS SWEPT
+  // ==========================================================
 
-  const fractalTime =
-    fractal?.pivotTime
-      ? new Date(
-          fractal.pivotTime
-        ).toISOString()
-      : 'N/A';
-
-  const candleTime =
-    signal.liveCandleTime
-      ? new Date(
-          signal.liveCandleTime
-        ).toISOString()
-      : 'N/A';
-
-  let fractalLabel =
-    fractal?.fractalType;
+  let sweptFractal =
+    'LIQUIDITY SWEPT';
 
   if (
-    !fractalLabel
+    type === 'HIGH'
   ) {
-    fractalLabel =
-      type ===
-      'HIGH'
-        ? 'FILTERED TOP'
-        : type ===
-          'LOW'
-          ? 'FILTERED BOTTOM'
-          : 'RACHEL T FRACTAL';
+    sweptFractal =
+      '**TOP FRACTAL SWEPT**';
+  } else if (
+    type === 'LOW'
+  ) {
+    sweptFractal =
+      '**BOTTOM FRACTAL SWEPT**';
   }
+
+  // ==========================================================
+  // EMBED
+  // ==========================================================
 
   const embed =
     new EmbedBuilder()
       .setTitle(
-        `🚨 ${coin}`
-      )
-      .setDescription(
-        '**RACHEL_T LIQUIDITY SWEPT — CURRENT CANDLE RUNNING**'
+        'PDYN Liquidity Signal'
       )
       .addFields(
-        {
-          name:
-            'Source',
-          value:
-            '**MEXC Exchange**',
-          inline:
-            false,
-        },
         {
           name:
             'Timeframe',
@@ -1220,71 +1201,45 @@ async function sendLiveLiquidityAlert(
         },
         {
           name:
-            'Liquidity',
+            'Market Structure',
           value:
-            '**CURRENTLY SWEPT**',
+            structure,
           inline:
             true,
         },
         {
           name:
-            'Fractal',
+            'Liquidity Swept',
           value:
-            fractalLabel,
-          inline:
-            true,
-        },
-        {
-          name:
-            'Fractal Price',
-          value:
-            fmtPrice(
-              level
-            ),
-          inline:
-            true,
-        },
-        {
-          name:
-            'Current Candle Price',
-          value:
-            fmtPrice(
-              currentPrice
-            ),
-          inline:
-            true,
-        },
-        {
-          name:
-            'Fractal Candle',
-          value:
-            fractalTime,
-          inline:
-            false,
-        },
-        {
-          name:
-            'Current Candle',
-          value:
-            candleTime,
+            sweptFractal,
           inline:
             false,
         }
       )
       .setColor(
-        0xfee75c
+        structure.toUpperCase() ===
+        'BULLISH'
+          ? 0x57f287
+          : structure.toUpperCase() ===
+            'BEARISH'
+            ? 0xed4245
+            : 0xfee75c
       )
       .setFooter({
         text:
-          'PDYN • Rachel T CRT • MEXC Exchange • LIVE',
+          'PDYN • Rachel T Fractal • MEXC Exchange • LIVE',
       })
       .setTimestamp(
         new Date()
       );
 
+  // ==========================================================
+  // SEND
+  // ==========================================================
+
   await channel.send({
     content:
-      `🚨 **${coin} — LIQUIDITY SWEPT**`,
+      `🚨 **PDYN Liquidity Signal**`,
     embeds: [
       embed,
     ],
