@@ -37,7 +37,6 @@ import { isNewSignal } from './signalManager.js';
 //
 //   5m
 //   15m
-//   30m
 //   1h
 //   4h
 //   1d
@@ -79,7 +78,6 @@ const TIMEFRAMES =
   CRT_CONFIG.timeframes || {
     '5m': 5,
     '15m': 15,
-    '30m': 30,
     '1h': 60,
     '4h': 240,
     '1d': 1440,
@@ -95,9 +93,6 @@ const TIMEFRAME_MS = {
 
   '15m':
     15 * 60 * 1000,
-
-  '30m':
-    30 * 60 * 1000,
 
   '1h':
     60 * 60 * 1000,
@@ -300,7 +295,6 @@ const lastProcessedCandle =
 const TIMEFRAME_PRIORITY = [
   '5m',
   '15m',
-  '30m',
   '1h',
   '4h',
   '1d',
@@ -320,9 +314,6 @@ function timeframeLabel(
 
       '15m':
         '15 MINUTES',
-
-      '30m':
-        '30 MINUTES',
 
       '1h':
         '1 HOUR',
@@ -2325,11 +2316,6 @@ function scheduleTimeframeScan(
 //   :15
 //   :30
 //   :45
-//
-// 30m:
-//
-//   :00
-//   :30
 //
 // 1h:
 //
