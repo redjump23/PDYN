@@ -765,26 +765,37 @@ function formatCoin(
 }
 
 // ============================================================
-// CREATE CRT EMBED
+// CREATE CRT CONFIRMATION EMBED
+// ============================================================
+//
+// DISPLAY:
+//
+//   PDYN CRT CONFIRMATION
+//   Coin
+//   Source
+//   Timeframe
+//   Market Structure
+//   STD Deviation
+//   Liquidity
+//   RSI
+//
+// REMOVED:
+//
+//   • Fractal
+//   • Fractal Price
+//   • CONFIRM CRT Candle
+//
 // ============================================================
 
-function createSignalEmbed(
-  signal
-) {
+function createSignalEmbed(signal) {
   const structure =
-    getMarketStructure(
-      signal
-    );
+    getMarketStructure(signal);
 
   const emoji =
-    structureEmoji(
-      signal
-    );
+    structureEmoji(signal);
 
   const coin =
-    formatCoin(
-      signal.symbol
-    );
+    formatCoin(signal.symbol);
 
   const rsi =
     formatRSIState(
@@ -792,29 +803,10 @@ function createSignalEmbed(
     );
 
   const stdDeviation =
-    getStdDeviation(
-      signal
-    );
-
-  const fractalPrice =
-    getFractalPrice(
-      signal
-    );
-
-  const fractalType =
-    getFractalType(
-      signal
-    );
+    getStdDeviation(signal);
 
   const liquidity =
-    getLiquiditySweep(
-      signal
-    );
-
-  const confirmation =
-    formatConfirmation(
-      signal
-    );
+    getLiquiditySweep(signal);
 
   const embed =
     new EmbedBuilder()
@@ -826,119 +818,51 @@ function createSignalEmbed(
       )
       .addFields(
         {
-          name:
-            'Source',
-
-          value:
-            '**MEXC Exchange**',
-
-          inline:
-            false,
+          name: 'Source',
+          value: '**MEXC Exchange**',
+          inline: false,
         },
-
         {
-          name:
-            'Timeframe',
-
-          value:
-            timeframeLabel(
-              signal.timeframe
-            ),
-
-          inline:
-            true,
+          name: 'Timeframe',
+          value: timeframeLabel(
+            signal.timeframe
+          ),
+          inline: true,
         },
-
         {
-          name:
-            'Market Structure',
-
-          value:
-            structure,
-
-          inline:
-            true,
+          name: 'Market Structure',
+          value: structure,
+          inline: true,
         },
-
         {
-          name:
-            'STD Deviation',
-
-          value:
-            stdDeviation,
-
-          inline:
-            true,
+          name: 'STD Deviation',
+          value: stdDeviation,
+          inline: true,
         },
-
         {
-          name:
-            'Fractal',
-
-          value:
-            fractalType,
-
-          inline:
-            true,
+          name: 'Liquidity',
+          value: liquidity,
+          inline: true,
         },
-
         {
-          name:
-            'Fractal Price',
-
-          value:
-            fractalPrice,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            'Liquidity',
-
-          value:
-            liquidity,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            'CONFIRM CRT Candle',
-
-          value:
-            confirmation,
-
-          inline:
-            true,
-        },
-
-        {
-          name:
-            'RSI',
-
-          value:
-            rsi,
-
-          inline:
-            true,
+          name: 'RSI',
+          value: rsi,
+          inline: true,
         }
       )
       .setColor(
-        signalColor(
-          signal
-        )
+        signalColor(signal)
       )
       .setFooter({
         text:
           'PDYN • Rachel T CRT • MEXC Exchange',
       });
 
-  if (
-    signal.candleTime
-  ) {
+  // ==========================================================
+  // USE THE CLOSED MEXC CANDLE TIME
+  // ==========================================================
+
+  if (signal.candleTime) {
     const candleDate =
       new Date(
         signal.candleTime
@@ -957,7 +881,6 @@ function createSignalEmbed(
 
   return embed;
 }
-
 // ============================================================
 // SEND CONFIRMED CRT SIGNAL
 // ============================================================
